@@ -1725,6 +1725,13 @@ def internal_error(error):
 # Initialize database on first request
 with app.app_context():
     ensure_database()
+    
+    # Run enhanced location data migration
+    try:
+        from migrate_on_startup import run_startup_migration
+        run_startup_migration()
+    except Exception as e:
+        print(f"Startup migration warning: {e}")
 
 # Railway deployment compatibility - no app.run() call
 # Gunicorn imports 'app' object directly
