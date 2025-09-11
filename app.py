@@ -170,7 +170,7 @@ class CompatibilityMatrix(db.Model):
         }
 
 class BirthData(db.Model):
-    """Birth data for Human Design calculations"""
+    """Birth data for Human Design calculations with enhanced location support"""
     __tablename__ = 'birth_data'
     
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
@@ -182,6 +182,18 @@ class BirthData(db.Model):
     data_consent = db.Column(db.Boolean, default=False)
     sharing_consent = db.Column(db.Boolean, default=False)
     
+    # Enhanced location fields from OpenStreetMap Nominatim
+    location_display_name = db.Column(db.Text)
+    location_country = db.Column(db.String(100))
+    location_state = db.Column(db.String(100))
+    location_city = db.Column(db.String(100))
+    location_importance = db.Column(db.Numeric(5, 4))
+    location_osm_id = db.Column(db.BigInteger)
+    location_osm_type = db.Column(db.String(20))
+    timezone = db.Column(db.String(50))
+    location_source = db.Column(db.String(20), default='manual')
+    location_verified = db.Column(db.Boolean, default=False)
+    
     def to_dict(self):
         return {
             'user_id': self.user_id,
@@ -191,7 +203,18 @@ class BirthData(db.Model):
             'latitude': float(self.latitude) if self.latitude else None,
             'longitude': float(self.longitude) if self.longitude else None,
             'data_consent': self.data_consent,
-            'sharing_consent': self.sharing_consent
+            'sharing_consent': self.sharing_consent,
+            # Enhanced location data
+            'location_display_name': self.location_display_name,
+            'location_country': self.location_country,
+            'location_state': self.location_state,
+            'location_city': self.location_city,
+            'location_importance': float(self.location_importance) if self.location_importance else None,
+            'location_osm_id': self.location_osm_id,
+            'location_osm_type': self.location_osm_type,
+            'timezone': self.timezone,
+            'location_source': self.location_source,
+            'location_verified': self.location_verified
         }
 
 class HumanDesignData(db.Model):
@@ -1414,7 +1437,7 @@ def update_profile():
 @app.route('/api/profile/update-birth-data', methods=['POST'])
 @require_auth
 def update_birth_data():
-    """Update user birth data and recalculate compatibility"""
+    """Update user birth data with enhanced location support and recalculate compatibility"""
     try:
         data = request.get_json()
         birth_data_input = data.get('birth_data', {})
@@ -1431,12 +1454,37 @@ def update_birth_data():
             birth_data = BirthData(user_id=request.current_user_id)
             db.session.add(birth_data)
         
-        # Update birth data
+        # Update basic birth data
         birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
         birth_data.birth_time = datetime.strptime(birth_data_input['birth_time'], '%H:%M').time()
         birth_data.birth_location = birth_data_input['birth_location']
         birth_data.data_consent = True
-        birth_data.updated_at = datetime.utcnow()
+        
+        # Update enhanced location fields from OpenStreetMap Nominatim
+        if 'location_data' in birth_data_input:
+            location_data = birth_data_input['location_data']
+            
+            # Store enhanced location information
+            birth_data.location_display_name = location_data.get('display_name')
+            birth_data.location_country = location_data.get('country')
+            birth_data.location_state = location_data.get('state')
+            birth_data.location_city = location_data.get('city')
+            birth_data.location_importance = location_data.get('importance')
+            birth_data.location_osm_id = location_data.get('osm_id')
+            birth_data.location_osm_type = location_data.get('osm_type')
+            birth_data.timezone = location_data.get('timezone')
+            birth_data.location_source = location_data.get('source', 'nominatim')
+            birth_data.location_verified = location_data.get('verified', True)
+            
+            # Store coordinates if provided
+            if 'lat' in location_data and 'lon' in location_data:
+                birth_data.latitude = location_data['lat']
+                birth_data.longitude = location_data['lon']
+        
+        # Handle legacy coordinate data (for backward compatibility)
+        if 'latitude' in birth_data_input and 'longitude' in birth_data_input:
+            birth_data.latitude = birth_data_input['latitude']
+            birth_data.longitude = birth_data_input['longitude']
         
         # Store compatibility data if provided
         if 'compatibility_data' in birth_data_input:
@@ -1451,7 +1499,7 @@ def update_birth_data():
         
         return jsonify({
             'success': True,
-            'message': 'Birth data updated successfully',
+            'message': 'Birth data updated successfully with enhanced location data',
             'birth_data': birth_data.to_dict()
         })
     
