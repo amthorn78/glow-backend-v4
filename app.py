@@ -56,7 +56,13 @@ app.config.from_object(Config)
 # Initialize extensions
 db = SQLAlchemy()
 db.init_app(app)
-CORS(app, origins=Config.CORS_ORIGINS)
+
+# Configure CORS with explicit settings
+CORS(app, 
+     origins=Config.CORS_ORIGINS,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     supports_credentials=True)
 
 # ============================================================================
 # DATABASE MODELS
