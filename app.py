@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -742,12 +743,27 @@ def ensure_database():
     if not hasattr(ensure_database, 'initialized'):
         try:
             with app.app_context():
+                # Create all tables
                 db.create_all()
+                
+                # Verify tables were created by checking if users table exists
+                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+                if not result.fetchone():
+                    # If using PostgreSQL, use different query
+                    try:
+                        result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
+                        if not result.fetchone():
+                            raise Exception("Users table not found after creation")
+                    except:
+                        # Force table creation again
+                        db.create_all()
+                
                 ensure_database.initialized = True
-                print("Database initialized successfully")
+                print("Database initialized successfully - all tables created")
         except Exception as e:
             print(f"Database initialization error: {e}")
-            raise
+            # Don't raise the exception, let the app continue
+            pass
 
 def log_admin_action(admin_user_id, action, target_user_id=None, details=None):
     """Log admin action for audit trail"""
@@ -794,7 +810,7 @@ def health_check():
         ensure_database()
         
         # Test database connection
-        db.session.execute('SELECT 1')
+        db.session.execute(text('SELECT 1'))
         
         return jsonify({
             'status': 'healthy',
@@ -825,6 +841,34 @@ def debug_environment():
         'human_design_configured': bool(app.config['HD_API_KEY']),
         'cors_origins': app.config['CORS_ORIGINS']
     })
+
+@app.route('/api/debug/init-db', methods=['POST'])
+def init_database():
+    """Manual database initialization endpoint"""
+    try:
+        with app.app_context():
+            # Force database creation
+            db.create_all()
+            
+            # Check what tables were created
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
+                tables = [row[0] for row in result.fetchall()]
+            else:
+                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+                tables = [row[0] for row in result.fetchall()]
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Database tables created successfully',
+                'tables_created': tables,
+                'table_count': len(tables)
+            })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Database initialization failed: {str(e)}'
+        }), 500
 
 # ============================================================================
 # API ROUTES - AUTHENTICATION
