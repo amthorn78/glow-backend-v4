@@ -848,6 +848,55 @@ def debug_environment():
         'cors_origins': app.config['CORS_ORIGINS']
     })
 
+@app.route('/api/debug/test-human-design', methods=['POST'])
+def test_human_design_api():
+    """Test Human Design API geocoding (remove in production)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Test with provided data or default test data
+        test_data = {
+            'birth_date': data.get('birthdate', '17-Mar-1978'),
+            'birth_time': data.get('birthtime', '12:00'),
+            'birth_location': data.get('location', 'East Grand Rapids, Michigan, USA')
+        }
+        
+        print(f"Testing Human Design API with: {test_data}")
+        
+        # Call the Human Design API
+        api_response = call_human_design_api(test_data)
+        
+        if 'error' in api_response:
+            return jsonify({
+                'success': False,
+                'error': api_response['error'],
+                'test_data': test_data
+            }), 500
+        
+        # Return success with key information
+        return jsonify({
+            'success': True,
+            'test_data': test_data,
+            'api_configured': bool(app.config['HD_API_KEY']),
+            'geocoding_configured': bool(app.config['GEO_API_KEY']),
+            'response_keys': list(api_response.keys()),
+            'type': api_response.get('type'),
+            'profile': api_response.get('profile'),
+            'location_processed': api_response.get('location', 'Not found'),
+            'coordinates': api_response.get('coordinates', 'Not found'),
+            'timezone': api_response.get('timezone', 'Not found')
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'api_configured': bool(app.config.get('HD_API_KEY')),
+            'geocoding_configured': bool(app.config.get('GEO_API_KEY'))
+        }), 500
+
 @app.route('/api/debug/init-db', methods=['POST'])
 def init_database():
     """Manual database initialization endpoint"""
