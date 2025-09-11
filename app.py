@@ -1320,6 +1320,106 @@ def get_human_design():
         return jsonify({'error': 'Failed to get Human Design data'}), 500
 
 # ============================================================================
+# API ROUTES - PROFILE MANAGEMENT
+# ============================================================================
+
+@app.route('/api/profile', methods=['GET'])
+@require_auth
+def get_profile():
+    """Get user profile"""
+    try:
+        user = User.query.get(request.current_user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify(user.to_dict())
+    
+    except Exception as e:
+        print(f"Get profile error: {e}")
+        return jsonify({'error': 'Failed to get profile'}), 500
+
+@app.route('/api/profile', methods=['PUT'])
+@require_auth
+def update_profile():
+    """Update user profile"""
+    try:
+        data = request.get_json()
+        user = User.query.get(request.current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Update allowed profile fields
+        allowed_fields = ['name', 'bio', 'interests']
+        for field in allowed_fields:
+            if field in data:
+                setattr(user, field, data[field])
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Profile updated successfully',
+            'user': user.to_dict()
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        print(f"Update profile error: {e}")
+        return jsonify({'error': 'Failed to update profile'}), 500
+
+@app.route('/api/profile/update-birth-data', methods=['POST'])
+@require_auth
+def update_birth_data():
+    """Update user birth data and recalculate compatibility"""
+    try:
+        data = request.get_json()
+        birth_data_input = data.get('birth_data', {})
+        
+        # Validate required fields
+        required_fields = ['birth_date', 'birth_time', 'birth_location']
+        for field in required_fields:
+            if not birth_data_input.get(field):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Get or create birth data record
+        birth_data = BirthData.query.get(request.current_user_id)
+        if not birth_data:
+            birth_data = BirthData(user_id=request.current_user_id)
+            db.session.add(birth_data)
+        
+        # Update birth data
+        birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
+        birth_data.birth_time = datetime.strptime(birth_data_input['birth_time'], '%H:%M').time()
+        birth_data.birth_location = birth_data_input['birth_location']
+        birth_data.data_consent = True
+        birth_data.updated_at = datetime.utcnow()
+        
+        # Store compatibility data if provided
+        if 'compatibility_data' in birth_data_input:
+            birth_data.set_chart_data(birth_data_input['compatibility_data'])
+        
+        # Mark onboarding as completed if specified
+        if birth_data_input.get('onboarding_completed'):
+            user = User.query.get(request.current_user_id)
+            user.onboarding_completed = True
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Birth data updated successfully',
+            'birth_data': birth_data.to_dict()
+        })
+    
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'error': f'Invalid date/time format: {str(e)}'}), 400
+    except Exception as e:
+        db.session.rollback()
+        print(f"Update birth data error: {e}")
+        return jsonify({'error': 'Failed to update birth data'}), 500
+
+# ============================================================================
 # API ROUTES - ADMIN CONSOLE
 # ============================================================================
 
