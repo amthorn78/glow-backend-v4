@@ -1,5 +1,5 @@
 [start]
-cmd = "gunicorn --bind 0.0.0.0:$PORT app:app"
+cmd = "python -m gunicorn --bind 0.0.0.0:$PORT app:app"
 
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.11"
