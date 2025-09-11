@@ -875,18 +875,13 @@ def test_human_design_api():
                 'test_data': test_data
             }), 500
         
-        # Return success with key information
+        # Return success with full API response for debugging
         return jsonify({
             'success': True,
             'test_data': test_data,
             'api_configured': bool(app.config['HD_API_KEY']),
             'geocoding_configured': bool(app.config['GEO_API_KEY']),
-            'response_keys': list(api_response.keys()),
-            'type': api_response.get('type'),
-            'profile': api_response.get('profile'),
-            'location_processed': api_response.get('location', 'Not found'),
-            'coordinates': api_response.get('coordinates', 'Not found'),
-            'timezone': api_response.get('timezone', 'Not found')
+            'full_response': api_response  # Show complete response to debug geocoding
         })
         
     except Exception as e:
