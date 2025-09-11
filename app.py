@@ -49,7 +49,7 @@ class Config:
     
     # Frontend integration
     FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,https://www.glowme.io,https://glowme.io,https://glow-frontend-new.vercel.app').split(',')
 
 app.config.from_object(Config)
 
