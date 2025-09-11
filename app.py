@@ -1251,6 +1251,59 @@ def calculate_human_design():
         print(f"Calculate Human Design error: {e}")
         return jsonify({'error': 'Failed to calculate Human Design chart'}), 500
 
+@app.route('/api/human-design/generate-bodygraph', methods=['POST'])
+@require_auth
+def generate_bodygraph():
+    """Generate Human Design bodygraph for admin onboarding"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['birthdate', 'birthtime', 'location']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Call Human Design API directly with the provided data
+        api_response = call_human_design_api({
+            'birth_date': data['birthdate'],
+            'birth_time': data['birthtime'], 
+            'birth_location': data['location']
+        })
+        
+        if 'error' in api_response:
+            return jsonify({'error': api_response['error']}), 500
+        
+        # Store or update Human Design data for the user
+        hd_data = HumanDesignData.query.get(request.current_user_id)
+        if not hd_data:
+            hd_data = HumanDesignData(user_id=request.current_user_id)
+            db.session.add(hd_data)
+        
+        # Extract and store key information from API response
+        hd_data.type = api_response.get('type')
+        hd_data.strategy = api_response.get('strategy')
+        hd_data.authority = api_response.get('authority')
+        hd_data.profile = api_response.get('profile')
+        hd_data.centers = json.dumps(api_response.get('centers', {}))
+        hd_data.gates = json.dumps(api_response.get('gates', {}))
+        hd_data.channels = json.dumps(api_response.get('channels', {}))
+        hd_data.full_chart_data = json.dumps(api_response)
+        hd_data.calculated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Human Design bodygraph generated successfully',
+            'bodygraph': api_response,
+            'human_design': hd_data.to_dict()
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        print(f"Generate bodygraph error: {e}")
+        return jsonify({'error': 'Failed to generate Human Design bodygraph'}), 500
+
 @app.route('/api/human-design', methods=['GET'])
 @require_auth
 def get_human_design():
