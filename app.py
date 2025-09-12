@@ -2105,9 +2105,8 @@ def update_birth_data():
             birth_data.latitude = birth_data_input['latitude']
             birth_data.longitude = birth_data_input['longitude']
         
-        # Store compatibility data if provided
-        if 'compatibility_data' in birth_data_input:
-            birth_data.set_chart_data(birth_data_input['compatibility_data'])
+        # Note: Compatibility data is now handled by HumanDesignData model
+        # birth_data only stores basic birth information
         
         # Mark onboarding as completed if specified
         if birth_data_input.get('onboarding_completed'):
@@ -2131,8 +2130,8 @@ def update_birth_data():
             hd_response = call_human_design_api(api_data)
             
             if 'error' not in hd_response:
-                # Store the raw Human Design chart data in birth_data for backward compatibility
-                birth_data.set_chart_data(hd_response)
+                # HD chart data is stored in HumanDesignData model via extract_hd_data_from_api
+                # birth_data only stores basic birth information
                 
                 # Extract comprehensive HD data using the new extraction engine
                 from hd_data_extractor import extract_hd_data_from_api
