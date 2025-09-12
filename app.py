@@ -2264,6 +2264,29 @@ with app.app_context():
 # Gunicorn imports 'app' object directly
 
 
+@app.route('/api/admin/debug-users', methods=['GET'])
+def debug_users():
+    """Debug endpoint to check users in database"""
+    try:
+        users = User.query.all()
+        user_list = []
+        for user in users:
+            user_list.append({
+                'email': user.email,
+                'status': user.status,
+                'is_admin': user.is_admin,
+                'created_at': user.created_at.isoformat() if user.created_at else None
+            })
+        
+        return jsonify({
+            'total_users': len(users),
+            'users': user_list
+        })
+        
+    except Exception as e:
+        print(f"Debug users error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/initialize', methods=['POST'])
 def initialize_admin():
     """Initialize admin user - for deployment setup only"""
