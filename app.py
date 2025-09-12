@@ -1497,12 +1497,51 @@ def update_birth_data():
         
         db.session.commit()
         
-        return jsonify({
-            'success': True,
-            'message': 'Birth data updated successfully with enhanced location data',
-            'birth_data': birth_data.to_dict()
-        })
-    
+        # After successfully saving birth data, call Human Design API
+        try:
+            # Format data for Human Design API
+            api_data = {
+                'birth_date': birth_data.birth_date.strftime('%d-%b-%Y'),  # Format: 17-Mar-1978
+                'birth_time': birth_data.birth_time.strftime('%H:%M'),     # Format: 14:30
+                'birth_location': birth_data.birth_location
+            }
+            
+            print(f"Calling Human Design API with formatted data: {api_data}")
+            
+            # Call Human Design API
+            hd_response = call_human_design_api(api_data)
+            
+            if 'error' not in hd_response:
+                # Store the Human Design chart data
+                birth_data.set_chart_data(hd_response)
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Birth data updated and compatibility profile generated successfully',
+                    'birth_data': birth_data.to_dict(),
+                    'human_design_data': hd_response
+                })
+            else:
+                # Birth data saved but Human Design API failed
+                print(f"Human Design API error: {hd_response['error']}")
+                return jsonify({
+                    'success': True,
+                    'message': 'Birth data updated successfully, but compatibility profile generation failed',
+                    'birth_data': birth_data.to_dict(),
+                    'human_design_error': hd_response['error']
+                })
+                
+        except Exception as hd_error:
+            print(f"Human Design API call failed: {hd_error}")
+            # Birth data was saved successfully, but Human Design API failed
+            return jsonify({
+                'success': True,
+                'message': 'Birth data updated successfully, but compatibility profile generation failed',
+                'birth_data': birth_data.to_dict(),
+                'human_design_error': str(hd_error)
+            })
+        
     except ValueError as e:
         db.session.rollback()
         return jsonify({'error': f'Invalid date/time format: {str(e)}'}), 400
