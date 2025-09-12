@@ -1690,6 +1690,51 @@ def update_profile():
         print(f"Update profile error: {e}")
         return jsonify({'error': 'Failed to update profile'}), 500
 
+@app.route('/api/profile/birth-data', methods=['GET'])
+@require_auth
+def get_profile_birth_data():
+    """Get user's birth data for profile management"""
+    try:
+        birth_data = BirthData.query.get(request.current_user_id)
+        if not birth_data:
+            return jsonify({'birth_data': None})
+        
+        return jsonify(birth_data.to_dict())
+    
+    except Exception as e:
+        print(f"Get profile birth data error: {e}")
+        return jsonify({'error': 'Failed to get birth data'}), 500
+
+@app.route('/api/profile/human-design', methods=['GET'])
+@require_auth
+def get_profile_human_design():
+    """Get user's human design data for profile management"""
+    try:
+        # Try to get from the new comprehensive HD table first
+        hd_data = HumanDesignData.query.filter_by(user_id=request.current_user_id).first()
+        if hd_data:
+            return jsonify(hd_data.to_dict())
+        
+        # Fallback to birth_data chart_data for backward compatibility
+        birth_data = BirthData.query.get(request.current_user_id)
+        if birth_data and birth_data.chart_data:
+            return jsonify({
+                'user_id': request.current_user_id,
+                'type': birth_data.chart_data.get('type'),
+                'strategy': birth_data.chart_data.get('strategy'),
+                'authority': birth_data.chart_data.get('authority'),
+                'profile': birth_data.chart_data.get('profile'),
+                'definition': birth_data.chart_data.get('definition'),
+                'calculated_at': birth_data.updated_at.isoformat() if birth_data.updated_at else None,
+                'raw_data': birth_data.chart_data
+            })
+        
+        return jsonify({'human_design_data': None})
+    
+    except Exception as e:
+        print(f"Get profile human design error: {e}")
+        return jsonify({'error': 'Failed to get human design data'}), 500
+
 @app.route('/api/profile/update-birth-data', methods=['POST'])
 @require_auth
 def update_birth_data():
