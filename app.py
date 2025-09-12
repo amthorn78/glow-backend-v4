@@ -155,6 +155,49 @@ class UserPriorities(db.Model):
             self.decisions_priority, self.support_priority, self.growth_priority, self.space_priority
         ]
 
+class UserProfile(db.Model):
+    """User profile data separated from authentication data"""
+    __tablename__ = 'user_profiles'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    first_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
+    bio = db.Column(db.Text)
+    age = db.Column(db.Integer)
+    profile_completion = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship back to user
+    user = db.relationship('User', backref=db.backref('profile', uselist=False, cascade='all, delete-orphan'))
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'bio': self.bio,
+            'age': self.age,
+            'profile_completion': self.profile_completion,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def calculate_completion(self):
+        """Calculate profile completion percentage"""
+        completion = 0
+        total_fields = 4  # first_name, last_name, bio, age
+        
+        if self.first_name: completion += 25
+        if self.last_name: completion += 25
+        if self.bio: completion += 25
+        if self.age: completion += 25
+        
+        self.profile_completion = completion
+        return completion
+
 class CompatibilityMatrix(db.Model):
     """Pre-calculated compatibility scores"""
     __tablename__ = 'compatibility_matrix'
@@ -1268,6 +1311,87 @@ def init_database():
             'message': f'Database initialization failed: {str(e)}'
         }), 500
 
+@app.route('/api/debug/migrate-user-profiles', methods=['POST'])
+def migrate_user_profiles():
+    """Migrate existing user data to user_profiles table"""
+    try:
+        with app.app_context():
+            # First ensure tables exist
+            db.create_all()
+            
+            # Check if users table has profile data to migrate
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                check_columns = db.session.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+                """))
+            else:
+                # SQLite
+                check_columns = db.session.execute(text("PRAGMA table_info(users)"))
+            
+            columns = [row[0] for row in check_columns.fetchall()]
+            has_profile_data = 'first_name' in columns or 'last_name' in columns
+            
+            migrated_count = 0
+            
+            if has_profile_data:
+                # Get users with profile data
+                users_with_data = db.session.execute(text("""
+                    SELECT id, first_name, last_name, created_at 
+                    FROM users 
+                    WHERE first_name IS NOT NULL OR last_name IS NOT NULL
+                """)).fetchall()
+                
+                # Create profile records for users
+                for user_data in users_with_data:
+                    user_id, first_name, last_name, created_at = user_data
+                    
+                    # Check if profile already exists
+                    existing_profile = UserProfile.query.filter_by(user_id=user_id).first()
+                    if existing_profile:
+                        continue
+                    
+                    # Calculate completion
+                    completion = 0
+                    if first_name: completion += 25
+                    if last_name: completion += 25
+                    
+                    # Create new profile
+                    profile = UserProfile(
+                        user_id=user_id,
+                        first_name=first_name,
+                        last_name=last_name,
+                        profile_completion=completion,
+                        created_at=created_at,
+                        updated_at=datetime.utcnow()
+                    )
+                    
+                    db.session.add(profile)
+                    migrated_count += 1
+                
+                db.session.commit()
+            
+            # Get final counts
+            total_users = User.query.count()
+            total_profiles = UserProfile.query.count()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'User profiles migration completed',
+                'migrated_count': migrated_count,
+                'total_users': total_users,
+                'total_profiles': total_profiles,
+                'had_profile_data': has_profile_data
+            })
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Migration failed: {str(e)}'
+        }), 500
+
 # ============================================================================
 # API ROUTES - AUTHENTICATION
 # ============================================================================
@@ -1715,13 +1839,37 @@ def get_human_design():
 @app.route('/api/profile', methods=['GET'])
 @require_auth
 def get_profile():
-    """Get user profile"""
+    """Get user profile with separated auth and profile data"""
     try:
         user = User.query.get(request.current_user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        return jsonify(user.to_dict())
+        # Get or create profile
+        profile = UserProfile.query.filter_by(user_id=user.id).first()
+        if not profile:
+            # Create empty profile for user
+            profile = UserProfile(user_id=user.id)
+            db.session.add(profile)
+            db.session.commit()
+        
+        # Combine user and profile data
+        profile_data = {
+            'id': user.id,
+            'email': user.email,
+            'status': user.status,
+            'is_admin': user.is_admin,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'updated_at': user.updated_at.isoformat() if user.updated_at else None,
+            # Profile data
+            'first_name': profile.first_name,
+            'last_name': profile.last_name,
+            'bio': profile.bio,
+            'age': profile.age,
+            'profile_completion': profile.profile_completion
+        }
+        
+        return jsonify(profile_data)
     
     except Exception as e:
         print(f"Get profile error: {e}")
@@ -1730,7 +1878,7 @@ def get_profile():
 @app.route('/api/profile', methods=['PUT'])
 @require_auth
 def update_profile():
-    """Update user profile"""
+    """Update user profile with separated auth and profile data"""
     try:
         data = request.get_json()
         user = User.query.get(request.current_user_id)
@@ -1738,18 +1886,50 @@ def update_profile():
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Update allowed profile fields
-        allowed_fields = ['first_name', 'last_name', 'email']
-        for field in allowed_fields:
+        # Get or create profile
+        profile = UserProfile.query.filter_by(user_id=user.id).first()
+        if not profile:
+            profile = UserProfile(user_id=user.id)
+            db.session.add(profile)
+        
+        # Update user fields (auth-related)
+        user_fields = ['email']
+        for field in user_fields:
             if field in data and data[field] is not None:
                 setattr(user, field, data[field])
         
+        # Update profile fields
+        profile_fields = ['first_name', 'last_name', 'bio', 'age']
+        for field in profile_fields:
+            if field in data and data[field] is not None:
+                setattr(profile, field, data[field])
+        
+        # Recalculate profile completion
+        profile.calculate_completion()
+        profile.updated_at = datetime.utcnow()
+        
         db.session.commit()
+        
+        # Return combined data
+        profile_data = {
+            'id': user.id,
+            'email': user.email,
+            'status': user.status,
+            'is_admin': user.is_admin,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'updated_at': user.updated_at.isoformat() if user.updated_at else None,
+            # Profile data
+            'first_name': profile.first_name,
+            'last_name': profile.last_name,
+            'bio': profile.bio,
+            'age': profile.age,
+            'profile_completion': profile.profile_completion
+        }
         
         return jsonify({
             'message': 'Profile updated successfully',
             'success': True,
-            'user': user.to_dict()
+            'user': profile_data
         })
     
     except Exception as e:
