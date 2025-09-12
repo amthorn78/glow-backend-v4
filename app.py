@@ -54,7 +54,8 @@ class Config:
     PRODUCTION_ORIGINS = [
         'https://www.glowme.io',
         'https://glowme.io', 
-        'https://glow-frontend-new.vercel.app'
+        'https://glow-frontend-new.vercel.app',
+        'https://glow-frontend-v2.vercel.app'
     ]
     
     # Development CORS origins (includes localhost)
@@ -63,7 +64,8 @@ class Config:
         'http://localhost:5173',
         'https://www.glowme.io',
         'https://glowme.io',
-        'https://glow-frontend-new.vercel.app'
+        'https://glow-frontend-new.vercel.app',
+        'https://glow-frontend-v2.vercel.app'
     ]
     
     # Use environment variable or detect based on environment
