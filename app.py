@@ -1739,22 +1739,23 @@ def update_profile():
             return jsonify({'error': 'User not found'}), 404
         
         # Update allowed profile fields
-        allowed_fields = ['name', 'bio', 'interests']
+        allowed_fields = ['first_name', 'last_name', 'email']
         for field in allowed_fields:
-            if field in data:
+            if field in data and data[field] is not None:
                 setattr(user, field, data[field])
         
         db.session.commit()
         
         return jsonify({
             'message': 'Profile updated successfully',
+            'success': True,
             'user': user.to_dict()
         })
     
     except Exception as e:
         db.session.rollback()
         print(f"Update profile error: {e}")
-        return jsonify({'error': 'Failed to update profile'}), 500
+        return jsonify({'error': 'Failed to update profile', 'success': False}), 500
 
 @app.route('/api/profile/birth-data', methods=['GET'])
 @require_auth
