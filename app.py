@@ -174,11 +174,23 @@ class CompatibilityMatrix(db.Model):
     overall_score = db.Column(db.SmallInteger)
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # HD Enhancement Fields
+    hd_enhancement_factor = db.Column(db.Float)  # HD intelligence enhancement factor
+    compatibility_insights = db.Column(db.Text)  # JSON array of insights
+    
     def to_dict(self):
+        import json
+        insights = []
+        if self.compatibility_insights:
+            try:
+                insights = json.loads(self.compatibility_insights)
+            except:
+                pass
+        
         return {
             'user_a_id': self.user_a_id,
             'user_b_id': self.user_b_id,
-            'scores': {
+            'dimension_scores': {
                 'love': self.love_score,
                 'intimacy': self.intimacy_score,
                 'communication': self.communication_score,
@@ -191,6 +203,9 @@ class CompatibilityMatrix(db.Model):
                 'space': self.space_score
             },
             'overall_score': self.overall_score,
+            'hd_enhancement_factor': self.hd_enhancement_factor,
+            'compatibility_insights': insights,
+            'enhanced_by_hd': self.hd_enhancement_factor is not None,
             'calculated_at': self.calculated_at.isoformat() if self.calculated_at else None
         }
 
@@ -667,7 +682,7 @@ def calculate_compatibility_score(user1_priorities, user2_priorities):
     }
 
 def calculate_mutual_compatibility(user1_id, user2_id):
-    """Calculate bidirectional compatibility between two users"""
+    """Calculate bidirectional compatibility between two users with HD intelligence"""
     try:
         user1_priorities = UserPriorities.query.get(user1_id)
         user2_priorities = UserPriorities.query.get(user2_id)
@@ -679,16 +694,26 @@ def calculate_mutual_compatibility(user1_id, user2_id):
         priorities1 = user1_priorities.get_priorities_array()
         priorities2 = user2_priorities.get_priorities_array()
         
-        # Calculate compatibility
-        compatibility = calculate_compatibility_score(priorities1, priorities2)
+        # Calculate base Magic 10 compatibility
+        magic10_compatibility = calculate_compatibility_score(priorities1, priorities2)
         
-        return compatibility
+        # Enhance with HD intelligence
+        try:
+            from hd_intelligence_engine import calculate_enhanced_compatibility
+            enhanced_compatibility = calculate_enhanced_compatibility(
+                user1_id, user2_id, magic10_compatibility
+            )
+            return enhanced_compatibility
+        except Exception as hd_error:
+            print(f"HD enhancement failed, using Magic 10 only: {hd_error}")
+            return magic10_compatibility
+        
     except Exception as e:
         print(f"Error calculating mutual compatibility: {e}")
         return None
 
 def store_compatibility_result(user_a_id, user_b_id, compatibility_result):
-    """Store compatibility calculation result in database"""
+    """Store compatibility calculation result in database with HD enhancement"""
     try:
         # Check if result already exists
         existing = CompatibilityMatrix.query.filter_by(
@@ -719,6 +744,14 @@ def store_compatibility_result(user_a_id, user_b_id, compatibility_result):
         compatibility_record.space_score = scores.get('space', 0)
         compatibility_record.overall_score = compatibility_result['overall_score']
         compatibility_record.calculated_at = datetime.utcnow()
+        
+        # Store HD enhancement data if available
+        if 'hd_enhancement_factor' in compatibility_result:
+            compatibility_record.hd_enhancement_factor = compatibility_result['hd_enhancement_factor']
+        
+        if 'compatibility_insights' in compatibility_result:
+            import json
+            compatibility_record.compatibility_insights = json.dumps(compatibility_result['compatibility_insights'])
         
         if not existing:
             db.session.add(compatibility_record)
@@ -1561,7 +1594,7 @@ def save_birth_data():
 @app.route('/api/human-design/calculate', methods=['POST'])
 @require_auth
 def calculate_human_design():
-    """Calculate Human Design chart"""
+    """Calculate Human Design chart with enhanced intelligence"""
     try:
         # Get user's birth data
         birth_data = BirthData.query.get(request.current_user_id)
@@ -1571,42 +1604,39 @@ def calculate_human_design():
         if not birth_data.data_consent:
             return jsonify({'error': 'Data consent required'}), 403
         
-        # Prepare data for API call
-        api_data = {
-            'birth_date': birth_data.birth_date.strftime('%d-%b-%y'),
+        # Prepare data for HD intelligence engine
+        birth_data_dict = {
+            'birth_date': birth_data.birth_date.strftime('%Y-%m-%d'),
             'birth_time': birth_data.birth_time.strftime('%H:%M'),
-            'birth_location': birth_data.birth_location
+            'latitude': float(birth_data.latitude) if birth_data.latitude else 0.0,
+            'longitude': float(birth_data.longitude) if birth_data.longitude else 0.0,
+            'timezone': 'UTC'  # Default timezone
         }
         
-        # Call Human Design API
-        api_response = call_human_design_api(api_data)
-        if 'error' in api_response:
-            return jsonify({'error': api_response['error']}), 500
-        
-        # Store Human Design data
-        hd_data = HumanDesignData.query.get(request.current_user_id)
-        if not hd_data:
-            hd_data = HumanDesignData(user_id=request.current_user_id)
-            db.session.add(hd_data)
-        
-        # Extract key information from API response
-        hd_data.set_api_response(api_response)
-        hd_data.set_chart_data(api_response.get('chart', {}))
-        hd_data.energy_type = api_response.get('type', '')
-        hd_data.strategy = api_response.get('strategy', '')
-        hd_data.authority = api_response.get('authority', '')
-        hd_data.profile = api_response.get('profile', '')
-        hd_data.calculated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Human Design chart calculated successfully',
-            'human_design': hd_data.to_dict()
-        })
+        # Calculate HD chart using intelligence engine
+        try:
+            from hd_intelligence_engine import get_or_calculate_hd_chart
+            chart_data = get_or_calculate_hd_chart(request.current_user_id, birth_data_dict)
+            
+            if not chart_data:
+                return jsonify({'error': 'Failed to calculate HD chart'}), 500
+            
+            # Get the stored HD data
+            hd_data = HumanDesignData.query.get(request.current_user_id)
+            
+            return jsonify({
+                'message': 'Human Design chart calculated successfully',
+                'chart_calculated': True,
+                'has_hd_data': hd_data is not None,
+                'type': hd_data.energy_type if hd_data else None,
+                'authority': hd_data.authority if hd_data else None
+            })
+            
+        except Exception as hd_error:
+            print(f"HD intelligence engine error: {hd_error}")
+            return jsonify({'error': 'HD calculation service unavailable'}), 503
     
     except Exception as e:
-        db.session.rollback()
         print(f"Calculate Human Design error: {e}")
         return jsonify({'error': 'Failed to calculate Human Design chart'}), 500
 
