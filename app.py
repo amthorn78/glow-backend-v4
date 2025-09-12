@@ -92,14 +92,12 @@ CORS(app,
 # ============================================================================
 
 class User(db.Model):
-    """User model with Railway-optimized schema"""
+    """User authentication model - minimal auth data only"""
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
-    first_name = db.Column(db.String(50))
-    last_name = db.Column(db.String(50))
     status = db.Column(db.String(20), default='pending')  # pending, approved, suspended
     is_admin = db.Column(db.Boolean, default=False, nullable=False)  # Admin privilege flag
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -109,8 +107,6 @@ class User(db.Model):
         return {
             'id': self.id,
             'email': self.email,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
             'status': self.status,
             'is_admin': self.is_admin,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -1390,6 +1386,49 @@ def migrate_user_profiles():
         return jsonify({
             'status': 'error',
             'message': f'Migration failed: {str(e)}'
+        }), 500
+
+@app.route('/api/debug/cleanup-user-redundancy', methods=['POST'])
+def cleanup_user_redundancy():
+    """Remove redundant first_name and last_name columns from users table"""
+    try:
+        with app.app_context():
+            # Check if columns exist before trying to drop them
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                check_columns = db.session.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+                """))
+                existing_columns = [row[0] for row in check_columns.fetchall()]
+                
+                # Drop columns if they exist
+                for column in existing_columns:
+                    try:
+                        db.session.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {column}"))
+                        print(f"Dropped column: {column}")
+                    except Exception as e:
+                        print(f"Could not drop column {column}: {e}")
+                
+            else:
+                # SQLite - more complex, need to recreate table
+                print("SQLite detected - column dropping requires table recreation")
+                # For SQLite, we'd need to recreate the table, but this is more complex
+                # For now, just report the status
+                
+            db.session.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'User table redundancy cleanup completed',
+                'columns_processed': existing_columns if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'] else ['SQLite - manual cleanup needed']
+            })
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': f'Cleanup failed: {str(e)}'
         }), 500
 
 # ============================================================================
