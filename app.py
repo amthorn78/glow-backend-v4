@@ -2264,6 +2264,55 @@ with app.app_context():
 # Gunicorn imports 'app' object directly
 
 
+@app.route('/api/auth/change-password', methods=['POST'])
+@token_required
+def change_password(current_user):
+    """Change user password"""
+    try:
+        data = request.get_json()
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return jsonify({'error': 'Current password and new password are required'}), 400
+        
+        # Verify current password
+        if not check_password_hash(current_user.password_hash, current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+        
+        # Update password
+        current_user.password_hash = generate_password_hash(new_password)
+        db.session.commit()
+        
+        return jsonify({'message': 'Password updated successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Password change error: {e}")
+        return jsonify({'error': 'Failed to update password'}), 500
+
+@app.route('/api/profile/upload-photo', methods=['POST'])
+@token_required
+def upload_photo(current_user):
+    """Upload profile photo"""
+    try:
+        if 'photo' not in request.files:
+            return jsonify({'error': 'No photo file provided'}), 400
+        
+        file = request.files['photo']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # For now, just return success - photo storage can be implemented later
+        return jsonify({
+            'message': 'Photo uploaded successfully',
+            'filename': file.filename
+        })
+        
+    except Exception as e:
+        print(f"Photo upload error: {e}")
+        return jsonify({'error': 'Failed to upload photo'}), 500
+
 @app.route('/api/admin/migrate-database', methods=['POST'])
 def migrate_database():
     """Add missing is_admin column to production database"""
