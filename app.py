@@ -2269,14 +2269,14 @@ def initialize_admin():
     """Initialize admin user - for deployment setup only"""
     try:
         # Check if admin already exists
-        admin = User.query.filter_by(email='admin@glow.com').first()
+        admin = User.query.filter_by(email='admin@glow.app').first()
         if admin:
             return jsonify({'message': 'Admin user already exists', 'email': admin.email})
         
         # Create admin user
         from werkzeug.security import generate_password_hash
         admin = User(
-            email='admin@glow.com',
+            email='admin@glow.app',
             password_hash=generate_password_hash('admin123'),
             first_name='Admin',
             last_name='User',
