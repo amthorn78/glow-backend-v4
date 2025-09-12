@@ -1798,15 +1798,25 @@ def update_birth_data():
             hd_response = call_human_design_api(api_data)
             
             if 'error' not in hd_response:
-                # Store the Human Design chart data
+                # Store the raw Human Design chart data in birth_data for backward compatibility
                 birth_data.set_chart_data(hd_response)
+                
+                # Extract comprehensive HD data using the new extraction engine
+                from hd_data_extractor import extract_hd_data_from_api
+                hd_data = extract_hd_data_from_api(hd_response, request.current_user_id)
+                
+                # Add to session and commit both records
+                db.session.add(hd_data)
                 db.session.commit()
+                
+                print(f"Successfully extracted and stored comprehensive HD data for user {request.current_user_id}")
                 
                 return jsonify({
                     'success': True,
-                    'message': 'Birth data updated and compatibility profile generated successfully',
+                    'message': 'Birth data updated and comprehensive compatibility profile generated successfully',
                     'birth_data': birth_data.to_dict(),
-                    'human_design_data': hd_response
+                    'human_design_data': hd_data.to_dict(),
+                    'raw_api_response': hd_response
                 })
             else:
                 # Birth data saved but Human Design API failed
@@ -1820,17 +1830,14 @@ def update_birth_data():
                 
         except Exception as hd_error:
             print(f"Human Design API call failed: {hd_error}")
-            # Birth data was saved successfully, but Human Design API failed
+            # Birth data is still saved, just HD processing failed
             return jsonify({
                 'success': True,
-                'message': 'Birth data updated successfully, but compatibility profile generation failed',
+                'message': 'Birth data updated successfully, but compatibility profile processing encountered an error',
                 'birth_data': birth_data.to_dict(),
                 'human_design_error': str(hd_error)
             })
-        
-    except ValueError as e:
-        db.session.rollback()
-        return jsonify({'error': f'Invalid date/time format: {str(e)}'}), 400
+    
     except Exception as e:
         db.session.rollback()
         print(f"Update birth data error: {e}")
@@ -1839,6 +1846,120 @@ def update_birth_data():
 # ============================================================================
 # API ROUTES - ADMIN CONSOLE
 # ============================================================================
+
+@app.route('/api/admin/users/search', methods=['GET'])
+@require_auth
+@require_admin
+def admin_search_users():
+    """Search users for admin HD viewer"""
+    try:
+        query = request.args.get('q', '').strip()
+        if not query:
+            return jsonify({'users': []})
+        
+        # Search by email, name, or user ID
+        users = User.query.filter(
+            db.or_(
+                User.email.ilike(f'%{query}%'),
+                User.name.ilike(f'%{query}%'),
+                User.id == query if query.isdigit() else False
+            )
+        ).limit(20).all()
+        
+        user_list = []
+        for user in users:
+            # Check if user has HD data
+            hd_data = HumanDesignData.query.get(user.id)
+            user_list.append({
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'created_at': user.created_at.isoformat() if user.created_at else None,
+                'has_hd_data': hd_data is not None,
+                'hd_calculated_at': hd_data.calculated_at.isoformat() if hd_data and hd_data.calculated_at else None
+            })
+        
+        return jsonify({'users': user_list})
+    
+    except Exception as e:
+        print(f"Admin search users error: {e}")
+        return jsonify({'error': 'Failed to search users'}), 500
+
+@app.route('/api/admin/users/<int:user_id>/human-design', methods=['GET'])
+@require_auth
+@require_admin
+def admin_get_user_hd_data(user_id):
+    """Get comprehensive Human Design data for a specific user (admin only)"""
+    try:
+        # Verify user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get HD data
+        hd_data = HumanDesignData.query.get(user_id)
+        if not hd_data:
+            return jsonify({'error': 'No Human Design data found for this user'}), 404
+        
+        # Get birth data for context
+        birth_data = BirthData.query.filter_by(user_id=user_id).first()
+        
+        return jsonify({
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'created_at': user.created_at.isoformat() if user.created_at else None
+            },
+            'birth_data': birth_data.to_dict() if birth_data else None,
+            'human_design': hd_data.to_dict(),
+            'raw_api_response': hd_data.get_api_response()
+        })
+    
+    except Exception as e:
+        print(f"Admin get HD data error: {e}")
+        return jsonify({'error': 'Failed to get Human Design data'}), 500
+
+@app.route('/api/admin/human-design/stats', methods=['GET'])
+@require_auth
+@require_admin
+def admin_hd_stats():
+    """Get Human Design statistics for admin dashboard"""
+    try:
+        # Count users with HD data
+        total_users = User.query.count()
+        users_with_hd = HumanDesignData.query.count()
+        
+        # Count by energy type
+        type_stats = db.session.query(
+            HumanDesignData.energy_type,
+            db.func.count(HumanDesignData.energy_type)
+        ).group_by(HumanDesignData.energy_type).all()
+        
+        # Count by authority
+        authority_stats = db.session.query(
+            HumanDesignData.authority,
+            db.func.count(HumanDesignData.authority)
+        ).group_by(HumanDesignData.authority).all()
+        
+        # Count by profile
+        profile_stats = db.session.query(
+            HumanDesignData.profile,
+            db.func.count(HumanDesignData.profile)
+        ).group_by(HumanDesignData.profile).all()
+        
+        return jsonify({
+            'total_users': total_users,
+            'users_with_hd_data': users_with_hd,
+            'completion_rate': round((users_with_hd / total_users * 100), 2) if total_users > 0 else 0,
+            'type_distribution': dict(type_stats),
+            'authority_distribution': dict(authority_stats),
+            'profile_distribution': dict(profile_stats)
+        })
+    
+    except Exception as e:
+        print(f"Admin HD stats error: {e}")
+        return jsonify({'error': 'Failed to get HD statistics'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
 @require_admin
