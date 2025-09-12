@@ -2264,6 +2264,35 @@ with app.app_context():
 # Gunicorn imports 'app' object directly
 
 
+@app.route('/api/test/database', methods=['GET'])
+def test_database():
+    """Test database connectivity and basic operations"""
+    try:
+        # Test basic database connection
+        result = db.session.execute(text('SELECT 1 as test')).fetchone()
+        
+        # Test user table access
+        user_count = User.query.count()
+        
+        # Test if we can read users
+        users = User.query.limit(5).all()
+        user_emails = [user.email for user in users]
+        
+        return jsonify({
+            'database_connection': 'OK',
+            'basic_query': result[0] if result else 'Failed',
+            'user_table_accessible': True,
+            'total_users': user_count,
+            'sample_user_emails': user_emails
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'database_connection': 'FAILED',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/admin/debug-users', methods=['GET'])
 def debug_users():
     """Debug endpoint to check users in database"""
