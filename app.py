@@ -2265,8 +2265,8 @@ with app.app_context():
 
 
 @app.route('/api/auth/change-password', methods=['POST'])
-@token_required
-def change_password(current_user):
+@require_auth
+def change_password():
     """Change user password"""
     try:
         data = request.get_json()
@@ -2275,6 +2275,11 @@ def change_password(current_user):
         
         if not current_password or not new_password:
             return jsonify({'error': 'Current password and new password are required'}), 400
+        
+        # Get current user
+        current_user = User.query.get(request.current_user_id)
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 404
         
         # Verify current password
         if not check_password_hash(current_user.password_hash, current_password):
@@ -2292,8 +2297,8 @@ def change_password(current_user):
         return jsonify({'error': 'Failed to update password'}), 500
 
 @app.route('/api/profile/upload-photo', methods=['POST'])
-@token_required
-def upload_photo(current_user):
+@require_auth
+def upload_photo():
     """Upload profile photo"""
     try:
         if 'photo' not in request.files:
