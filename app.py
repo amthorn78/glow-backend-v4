@@ -2388,6 +2388,35 @@ def test_database():
             'error_type': type(e).__name__
         }), 500
 
+@app.route('/api/admin/debug-birth-data', methods=['GET'])
+@require_auth
+def debug_birth_data():
+    """Debug endpoint to check birth data table"""
+    try:
+        # Check if birth_data table exists and has data
+        birth_data_records = BirthData.query.all()
+        
+        result = {
+            'total_birth_records': len(birth_data_records),
+            'birth_data_records': []
+        }
+        
+        for record in birth_data_records:
+            result['birth_data_records'].append({
+                'user_id': record.user_id,
+                'birth_date': str(record.birth_date) if record.birth_date else None,
+                'birth_time': str(record.birth_time) if record.birth_time else None,
+                'birth_location': record.birth_location,
+                'latitude': record.latitude,
+                'longitude': record.longitude,
+                'created_at': str(record.created_at) if hasattr(record, 'created_at') else None
+            })
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({'error': f'Birth data debug error: {str(e)}'}), 500
+
 @app.route('/api/admin/debug-users', methods=['GET'])
 def debug_users():
     """Debug endpoint to check users in database"""
