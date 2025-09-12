@@ -218,7 +218,7 @@ class BirthData(db.Model):
         }
 
 class HumanDesignData(db.Model):
-    """Human Design chart data with Railway-optimized schema"""
+    """Human Design chart data with comprehensive matching fields"""
     __tablename__ = 'human_design_data'
     
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
@@ -229,6 +229,54 @@ class HumanDesignData(db.Model):
     profile = db.Column(db.String(20))
     api_response = db.Column(db.Text)  # Cached full API response
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Centers (9 defined/undefined centers for electromagnetic connections)
+    center_head = db.Column(db.Boolean, default=False)
+    center_ajna = db.Column(db.Boolean, default=False)
+    center_throat = db.Column(db.Boolean, default=False)
+    center_g = db.Column(db.Boolean, default=False)
+    center_heart = db.Column(db.Boolean, default=False)
+    center_spleen = db.Column(db.Boolean, default=False)
+    center_solar_plexus = db.Column(db.Boolean, default=False)
+    center_sacral = db.Column(db.Boolean, default=False)
+    center_root = db.Column(db.Boolean, default=False)
+    
+    # Gates and Channels (critical for compatibility)
+    gates_defined = db.Column(db.Text)  # JSON array of defined gate numbers
+    gates_personality = db.Column(db.Text)  # JSON array of personality gates
+    gates_design = db.Column(db.Text)  # JSON array of design gates
+    channels_defined = db.Column(db.Text)  # JSON array of defined channel numbers
+    
+    # Variables (4 arrows - important for lifestyle compatibility)
+    digestion = db.Column(db.String(50))  # PHS - how to process
+    environment = db.Column(db.String(50))  # PHS - where to be
+    motivation = db.Column(db.String(50))  # Motivation arrow
+    perspective = db.Column(db.String(50))  # Perspective arrow
+    
+    # Incarnation Cross (life purpose compatibility)
+    incarnation_cross = db.Column(db.String(200))
+    cross_angle = db.Column(db.String(50))  # Right/Left angle, Juxtaposition
+    
+    # Definition and Circuitry (energy flow compatibility)
+    definition_type = db.Column(db.String(50))  # Single, Split, Triple Split, Quadruple Split, No Definition
+    circuitry_individual = db.Column(db.Integer, default=0)  # Count of individual circuitry
+    circuitry_tribal = db.Column(db.Integer, default=0)  # Count of tribal circuitry
+    circuitry_collective = db.Column(db.Integer, default=0)  # Count of collective circuitry
+    
+    # Key Planetary Activations (for deeper compatibility analysis)
+    sun_personality = db.Column(db.String(20))  # Gate.Line format (e.g., "1.3")
+    earth_personality = db.Column(db.String(20))
+    sun_design = db.Column(db.String(20))
+    earth_design = db.Column(db.String(20))
+    
+    # Compatibility connection caches (for performance)
+    electromagnetic_connections = db.Column(db.Text)  # JSON of electromagnetic connections
+    compromise_connections = db.Column(db.Text)  # JSON of compromise connections
+    dominance_connections = db.Column(db.Text)  # JSON of dominance connections
+    
+    # Schema versioning
+    schema_version = db.Column(db.Integer, default=2)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow)
     
     def set_chart_data(self, data):
         self.chart_data = json.dumps(data) if data else None
@@ -242,6 +290,18 @@ class HumanDesignData(db.Model):
     def get_api_response(self):
         return json.loads(self.api_response) if self.api_response else {}
     
+    def set_gates_defined(self, gates):
+        self.gates_defined = json.dumps(gates) if gates else None
+    
+    def get_gates_defined(self):
+        return json.loads(self.gates_defined) if self.gates_defined else []
+    
+    def set_channels_defined(self, channels):
+        self.channels_defined = json.dumps(channels) if channels else None
+    
+    def get_channels_defined(self):
+        return json.loads(self.channels_defined) if self.channels_defined else []
+    
     def to_dict(self):
         return {
             'user_id': self.user_id,
@@ -250,7 +310,46 @@ class HumanDesignData(db.Model):
             'strategy': self.strategy,
             'authority': self.authority,
             'profile': self.profile,
-            'calculated_at': self.calculated_at.isoformat() if self.calculated_at else None
+            'calculated_at': self.calculated_at.isoformat() if self.calculated_at else None,
+            # Centers
+            'centers': {
+                'head': self.center_head,
+                'ajna': self.center_ajna,
+                'throat': self.center_throat,
+                'g': self.center_g,
+                'heart': self.center_heart,
+                'spleen': self.center_spleen,
+                'solar_plexus': self.center_solar_plexus,
+                'sacral': self.center_sacral,
+                'root': self.center_root
+            },
+            # Gates and Channels
+            'gates_defined': self.get_gates_defined(),
+            'channels_defined': self.get_channels_defined(),
+            # Variables
+            'variables': {
+                'digestion': self.digestion,
+                'environment': self.environment,
+                'motivation': self.motivation,
+                'perspective': self.perspective
+            },
+            # Cross and Definition
+            'incarnation_cross': self.incarnation_cross,
+            'cross_angle': self.cross_angle,
+            'definition_type': self.definition_type,
+            'circuitry': {
+                'individual': self.circuitry_individual,
+                'tribal': self.circuitry_tribal,
+                'collective': self.circuitry_collective
+            },
+            # Key Planets
+            'key_planets': {
+                'sun_personality': self.sun_personality,
+                'earth_personality': self.earth_personality,
+                'sun_design': self.sun_design,
+                'earth_design': self.earth_design
+            },
+            'schema_version': self.schema_version
         }
 
 class AdminActionLog(db.Model):
@@ -1459,6 +1558,12 @@ def update_birth_data():
             birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
         except ValueError as e:
             return jsonify({'error': f'Invalid birth date format. Expected YYYY-MM-DD, got: {birth_data_input["birth_date"]}'}), 400
+        
+        # Verify user is 18+ years old
+        today = datetime.now().date()
+        age = today.year - birth_data.birth_date.year - ((today.month, today.day) < (birth_data.birth_date.month, birth_data.birth_date.day))
+        if age < 18:
+            return jsonify({'error': 'You must be at least 18 years old to use this service'}), 400
         
         # Handle various time formats
         birth_time_str = birth_data_input['birth_time']
