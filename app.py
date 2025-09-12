@@ -218,66 +218,135 @@ class BirthData(db.Model):
         }
 
 class HumanDesignData(db.Model):
-    """Human Design chart data with comprehensive matching fields"""
+    """Human Design chart data with comprehensive relational compatibility factors"""
     __tablename__ = 'human_design_data'
     
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
     chart_data = db.Column(db.Text)  # JSON as TEXT for Railway compatibility
-    energy_type = db.Column(db.String(50))
-    strategy = db.Column(db.String(100))
-    authority = db.Column(db.String(100))
-    profile = db.Column(db.String(20))
     api_response = db.Column(db.Text)  # Cached full API response
     calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Centers (9 defined/undefined centers for electromagnetic connections)
-    center_head = db.Column(db.Boolean, default=False)
-    center_ajna = db.Column(db.Boolean, default=False)
-    center_throat = db.Column(db.Boolean, default=False)
-    center_g = db.Column(db.Boolean, default=False)
-    center_heart = db.Column(db.Boolean, default=False)
-    center_spleen = db.Column(db.Boolean, default=False)
-    center_solar_plexus = db.Column(db.Boolean, default=False)
-    center_sacral = db.Column(db.Boolean, default=False)
-    center_root = db.Column(db.Boolean, default=False)
+    # === CORE TYPE & STRATEGY ===
+    energy_type = db.Column(db.String(50))  # Generator, Manifestor, Projector, Reflector
+    sub_type = db.Column(db.String(50))  # Manifesting Generator (if applicable)
+    strategy = db.Column(db.String(100))
+    type_relational_impact = db.Column(db.Text)  # How type affects relationships
     
-    # Gates and Channels (critical for compatibility)
+    # === AUTHORITY & DECISION MAKING ===
+    authority = db.Column(db.String(100))  # Emotional, Sacral, Splenic, Ego, Self-Projected, Environmental, Lunar
+    decision_pacing = db.Column(db.String(50))  # In-the-moment, requires waiting, instinctive
+    authority_compatibility_impact = db.Column(db.Text)  # How authority pacing aligns or conflicts
+    
+    # === DEFINITION & SPLITS ===
+    definition_type = db.Column(db.String(50))  # Single, Split, Triple Split, Quad Split, No Definition
+    split_bridges = db.Column(db.Text)  # JSON: gates/channels that bridge splits
+    definition_relational_impact = db.Column(db.Text)  # Attraction patterns, independence needs
+    
+    # === CENTERS (9 centers with relational dynamics) ===
+    center_head = db.Column(db.Boolean, default=False)
+    center_head_relational_impact = db.Column(db.Text)
+    center_ajna = db.Column(db.Boolean, default=False)
+    center_ajna_relational_impact = db.Column(db.Text)
+    center_throat = db.Column(db.Boolean, default=False)
+    center_throat_relational_impact = db.Column(db.Text)
+    center_g = db.Column(db.Boolean, default=False)
+    center_g_relational_impact = db.Column(db.Text)
+    center_heart = db.Column(db.Boolean, default=False)
+    center_heart_relational_impact = db.Column(db.Text)
+    center_spleen = db.Column(db.Boolean, default=False)
+    center_spleen_relational_impact = db.Column(db.Text)
+    center_solar_plexus = db.Column(db.Boolean, default=False)
+    center_solar_plexus_relational_impact = db.Column(db.Text)
+    center_sacral = db.Column(db.Boolean, default=False)
+    center_sacral_relational_impact = db.Column(db.Text)
+    center_root = db.Column(db.Boolean, default=False)
+    center_root_relational_impact = db.Column(db.Text)
+    
+    # === GATES (with hanging gates and relational impacts) ===
     gates_defined = db.Column(db.Text)  # JSON array of defined gate numbers
     gates_personality = db.Column(db.Text)  # JSON array of personality gates
     gates_design = db.Column(db.Text)  # JSON array of design gates
+    hanging_gates = db.Column(db.Text)  # JSON array of hanging gates seeking connection
+    key_relational_gates = db.Column(db.Text)  # JSON: gates 59,6,49,19,44,26,37,40 etc with impacts
+    
+    # === CHANNELS (with circuit and relational dynamics) ===
     channels_defined = db.Column(db.Text)  # JSON array of defined channel numbers
+    key_relationship_channels = db.Column(db.Text)  # JSON: 59-6, 49-19, 40-37, 44-26 etc with impacts
     
-    # Variables (4 arrows - important for lifestyle compatibility)
-    digestion = db.Column(db.String(50))  # PHS - how to process
-    environment = db.Column(db.String(50))  # PHS - where to be
-    motivation = db.Column(db.String(50))  # Motivation arrow
-    perspective = db.Column(db.String(50))  # Perspective arrow
+    # === PROFILE (with line-by-line relational impacts) ===
+    profile = db.Column(db.String(20))  # e.g., "1/3", "4/6", "2/4"
+    profile_line1 = db.Column(db.String(50))  # Investigator characteristics
+    profile_line2 = db.Column(db.String(50))  # Hermit characteristics  
+    profile_line3 = db.Column(db.String(50))  # Martyr characteristics
+    profile_line4 = db.Column(db.String(50))  # Opportunist characteristics
+    profile_line5 = db.Column(db.String(50))  # Heretic characteristics
+    profile_line6 = db.Column(db.String(50))  # Role Model characteristics
+    profile_relational_impact = db.Column(db.Text)  # How profile shapes relational style & attraction
     
-    # Incarnation Cross (life purpose compatibility)
+    # === INCARNATION CROSS ===
     incarnation_cross = db.Column(db.String(200))
+    cross_gates = db.Column(db.Text)  # JSON array of 4 gates that define the cross
     cross_angle = db.Column(db.String(50))  # Right/Left angle, Juxtaposition
+    cross_relational_impact = db.Column(db.Text)  # Compatibility of life themes & trajectories
     
-    # Definition and Circuitry (energy flow compatibility)
-    definition_type = db.Column(db.String(50))  # Single, Split, Triple Split, Quadruple Split, No Definition
+    # === CONDITIONING & OPENNESS ===
+    open_centers = db.Column(db.Text)  # JSON array of open center names
+    conditioning_themes = db.Column(db.Text)  # Areas most influenced by others
+    conditioning_relational_impact = db.Column(db.Text)  # Where attraction/conditioning happens
+    
+    # === CIRCUITRY (with relational impacts) ===
     circuitry_individual = db.Column(db.Integer, default=0)  # Count of individual circuitry
     circuitry_tribal = db.Column(db.Integer, default=0)  # Count of tribal circuitry
     circuitry_collective = db.Column(db.Integer, default=0)  # Count of collective circuitry
+    circuitry_relational_impact = db.Column(db.Text)  # Tribal→intimacy, Collective→ideals, Individual→uniqueness
     
-    # Key Planetary Activations (for deeper compatibility analysis)
+    # === NODES (North/South Node orientation) ===
+    conscious_node = db.Column(db.String(50))  # North Node
+    unconscious_node = db.Column(db.String(50))  # South Node
+    nodes_relational_impact = db.Column(db.Text)  # Environmental orientation compatibility
+    
+    # === PLANETARY ACTIVATIONS (advanced layer) ===
     sun_personality = db.Column(db.String(20))  # Gate.Line format (e.g., "1.3")
     earth_personality = db.Column(db.String(20))
+    moon_personality = db.Column(db.String(20))
+    mercury_personality = db.Column(db.String(20))
+    venus_personality = db.Column(db.String(20))
+    mars_personality = db.Column(db.String(20))
+    jupiter_personality = db.Column(db.String(20))
+    saturn_personality = db.Column(db.String(20))
+    uranus_personality = db.Column(db.String(20))
+    neptune_personality = db.Column(db.String(20))
+    pluto_personality = db.Column(db.String(20))
+    north_node_personality = db.Column(db.String(20))
+    south_node_personality = db.Column(db.String(20))
+    
     sun_design = db.Column(db.String(20))
     earth_design = db.Column(db.String(20))
+    moon_design = db.Column(db.String(20))
+    mercury_design = db.Column(db.String(20))
+    venus_design = db.Column(db.String(20))
+    mars_design = db.Column(db.String(20))
+    jupiter_design = db.Column(db.String(20))
+    saturn_design = db.Column(db.String(20))
+    uranus_design = db.Column(db.String(20))
+    neptune_design = db.Column(db.String(20))
+    pluto_design = db.Column(db.String(20))
+    north_node_design = db.Column(db.String(20))
+    south_node_design = db.Column(db.String(20))
     
-    # Compatibility connection caches (for performance)
+    planetary_relational_impacts = db.Column(db.Text)  # JSON: planet-specific relational impacts
+    
+    # === COMPATIBILITY CALCULATIONS (for Magic 10 algorithm) ===
     electromagnetic_connections = db.Column(db.Text)  # JSON of electromagnetic connections
-    compromise_connections = db.Column(db.Text)  # JSON of compromise connections
+    compromise_connections = db.Column(db.Text)  # JSON of compromise connections  
     dominance_connections = db.Column(db.Text)  # JSON of dominance connections
+    conditioning_dynamics = db.Column(db.Text)  # JSON of conditioning patterns with other charts
     
-    # Schema versioning
-    schema_version = db.Column(db.Integer, default=2)
+    # === METADATA ===
+    schema_version = db.Column(db.Integer, default=3)  # Updated to v3 for comprehensive relational factors
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # === HELPER METHODS ===
     def set_chart_data(self, data):
         self.chart_data = json.dumps(data) if data else None
     
@@ -296,59 +365,147 @@ class HumanDesignData(db.Model):
     def get_gates_defined(self):
         return json.loads(self.gates_defined) if self.gates_defined else []
     
+    def set_hanging_gates(self, gates):
+        self.hanging_gates = json.dumps(gates) if gates else None
+    
+    def get_hanging_gates(self):
+        return json.loads(self.hanging_gates) if self.hanging_gates else []
+    
     def set_channels_defined(self, channels):
         self.channels_defined = json.dumps(channels) if channels else None
     
     def get_channels_defined(self):
         return json.loads(self.channels_defined) if self.channels_defined else []
     
+    def set_open_centers(self, centers):
+        self.open_centers = json.dumps(centers) if centers else None
+    
+    def get_open_centers(self):
+        return json.loads(self.open_centers) if self.open_centers else []
+    
     def to_dict(self):
         return {
             'user_id': self.user_id,
             'chart_data': self.get_chart_data(),
-            'energy_type': self.energy_type,
-            'strategy': self.strategy,
-            'authority': self.authority,
-            'profile': self.profile,
             'calculated_at': self.calculated_at.isoformat() if self.calculated_at else None,
-            # Centers
+            
+            # Core Type & Strategy
+            'energy_type': self.energy_type,
+            'sub_type': self.sub_type,
+            'strategy': self.strategy,
+            'type_relational_impact': self.type_relational_impact,
+            
+            # Authority & Decision Making
+            'authority': self.authority,
+            'decision_pacing': self.decision_pacing,
+            'authority_compatibility_impact': self.authority_compatibility_impact,
+            
+            # Definition & Splits
+            'definition_type': self.definition_type,
+            'split_bridges': json.loads(self.split_bridges) if self.split_bridges else [],
+            'definition_relational_impact': self.definition_relational_impact,
+            
+            # Centers with relational impacts
             'centers': {
-                'head': self.center_head,
-                'ajna': self.center_ajna,
-                'throat': self.center_throat,
-                'g': self.center_g,
-                'heart': self.center_heart,
-                'spleen': self.center_spleen,
-                'solar_plexus': self.center_solar_plexus,
-                'sacral': self.center_sacral,
-                'root': self.center_root
+                'head': {'defined': self.center_head, 'relational_impact': self.center_head_relational_impact},
+                'ajna': {'defined': self.center_ajna, 'relational_impact': self.center_ajna_relational_impact},
+                'throat': {'defined': self.center_throat, 'relational_impact': self.center_throat_relational_impact},
+                'g': {'defined': self.center_g, 'relational_impact': self.center_g_relational_impact},
+                'heart': {'defined': self.center_heart, 'relational_impact': self.center_heart_relational_impact},
+                'spleen': {'defined': self.center_spleen, 'relational_impact': self.center_spleen_relational_impact},
+                'solar_plexus': {'defined': self.center_solar_plexus, 'relational_impact': self.center_solar_plexus_relational_impact},
+                'sacral': {'defined': self.center_sacral, 'relational_impact': self.center_sacral_relational_impact},
+                'root': {'defined': self.center_root, 'relational_impact': self.center_root_relational_impact}
             },
+            
             # Gates and Channels
             'gates_defined': self.get_gates_defined(),
+            'hanging_gates': self.get_hanging_gates(),
             'channels_defined': self.get_channels_defined(),
-            # Variables
-            'variables': {
-                'digestion': self.digestion,
-                'environment': self.environment,
-                'motivation': self.motivation,
-                'perspective': self.perspective
+            'key_relational_gates': json.loads(self.key_relational_gates) if self.key_relational_gates else {},
+            'key_relationship_channels': json.loads(self.key_relationship_channels) if self.key_relationship_channels else {},
+            
+            # Profile with line details
+            'profile': self.profile,
+            'profile_lines': {
+                'line1': self.profile_line1,
+                'line2': self.profile_line2,
+                'line3': self.profile_line3,
+                'line4': self.profile_line4,
+                'line5': self.profile_line5,
+                'line6': self.profile_line6
             },
-            # Cross and Definition
+            'profile_relational_impact': self.profile_relational_impact,
+            
+            # Incarnation Cross
             'incarnation_cross': self.incarnation_cross,
+            'cross_gates': json.loads(self.cross_gates) if self.cross_gates else [],
             'cross_angle': self.cross_angle,
-            'definition_type': self.definition_type,
+            'cross_relational_impact': self.cross_relational_impact,
+            
+            # Conditioning & Openness
+            'open_centers': self.get_open_centers(),
+            'conditioning_themes': self.conditioning_themes,
+            'conditioning_relational_impact': self.conditioning_relational_impact,
+            
+            # Circuitry
             'circuitry': {
                 'individual': self.circuitry_individual,
                 'tribal': self.circuitry_tribal,
-                'collective': self.circuitry_collective
+                'collective': self.circuitry_collective,
+                'relational_impact': self.circuitry_relational_impact
             },
-            # Key Planets
-            'key_planets': {
-                'sun_personality': self.sun_personality,
-                'earth_personality': self.earth_personality,
-                'sun_design': self.sun_design,
-                'earth_design': self.earth_design
+            
+            # Nodes
+            'nodes': {
+                'conscious': self.conscious_node,
+                'unconscious': self.unconscious_node,
+                'relational_impact': self.nodes_relational_impact
             },
+            
+            # Planetary Activations
+            'planetary_activations': {
+                'personality': {
+                    'sun': self.sun_personality,
+                    'earth': self.earth_personality,
+                    'moon': self.moon_personality,
+                    'mercury': self.mercury_personality,
+                    'venus': self.venus_personality,
+                    'mars': self.mars_personality,
+                    'jupiter': self.jupiter_personality,
+                    'saturn': self.saturn_personality,
+                    'uranus': self.uranus_personality,
+                    'neptune': self.neptune_personality,
+                    'pluto': self.pluto_personality,
+                    'north_node': self.north_node_personality,
+                    'south_node': self.south_node_personality
+                },
+                'design': {
+                    'sun': self.sun_design,
+                    'earth': self.earth_design,
+                    'moon': self.moon_design,
+                    'mercury': self.mercury_design,
+                    'venus': self.venus_design,
+                    'mars': self.mars_design,
+                    'jupiter': self.jupiter_design,
+                    'saturn': self.saturn_design,
+                    'uranus': self.uranus_design,
+                    'neptune': self.neptune_design,
+                    'pluto': self.pluto_design,
+                    'north_node': self.north_node_design,
+                    'south_node': self.south_node_design
+                },
+                'relational_impacts': json.loads(self.planetary_relational_impacts) if self.planetary_relational_impacts else {}
+            },
+            
+            # Compatibility Calculations
+            'compatibility_connections': {
+                'electromagnetic': json.loads(self.electromagnetic_connections) if self.electromagnetic_connections else {},
+                'compromise': json.loads(self.compromise_connections) if self.compromise_connections else {},
+                'dominance': json.loads(self.dominance_connections) if self.dominance_connections else {},
+                'conditioning_dynamics': json.loads(self.conditioning_dynamics) if self.conditioning_dynamics else {}
+            },
+            
             'schema_version': self.schema_version
         }
 
