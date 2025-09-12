@@ -47,9 +47,32 @@ class Config:
     GEO_API_KEY = os.environ.get('GEO_API_KEY')
     HD_API_BASE_URL = os.environ.get('HD_API_BASE_URL', 'https://api.humandesignapi.nl/v1')
     
-    # Frontend integration
+    # Frontend integration - Environment-aware CORS
     FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,https://www.glowme.io,https://glowme.io,https://glow-frontend-new.vercel.app').split(',')
+    
+    # Production CORS origins (secure)
+    PRODUCTION_ORIGINS = [
+        'https://www.glowme.io',
+        'https://glowme.io', 
+        'https://glow-frontend-new.vercel.app'
+    ]
+    
+    # Development CORS origins (includes localhost)
+    DEVELOPMENT_ORIGINS = [
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'https://www.glowme.io',
+        'https://glowme.io',
+        'https://glow-frontend-new.vercel.app'
+    ]
+    
+    # Use environment variable or detect based on environment
+    if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('DATABASE_URL'):
+        # Production environment
+        CORS_ORIGINS = PRODUCTION_ORIGINS
+    else:
+        # Development environment
+        CORS_ORIGINS = DEVELOPMENT_ORIGINS
 
 app.config.from_object(Config)
 
@@ -78,6 +101,7 @@ class User(db.Model):
     first_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
     status = db.Column(db.String(20), default='pending')  # pending, approved, suspended
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)  # Admin privilege flag
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -88,6 +112,7 @@ class User(db.Model):
             'first_name': self.first_name,
             'last_name': self.last_name,
             'status': self.status,
+            'is_admin': self.is_admin,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -828,12 +853,23 @@ def require_admin(f):
     """Decorator to require admin privileges"""
     def decorated_function(*args, **kwargs):
         # First check authentication
-        auth_result = require_auth(lambda: None)()
-        if auth_result:
-            return auth_result
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Authentication required'}), 401
         
-        # Check if user is admin (for now, any authenticated user can be admin)
-        # In production, you'd check a specific admin role
+        token = auth_header.split(' ')[1]
+        user_id = verify_session_token(token)
+        
+        if not user_id:
+            return jsonify({'error': 'Invalid or expired token'}), 401
+        
+        # Check if user is admin
+        user = User.query.get(user_id)
+        if not user or not user.is_admin:
+            return jsonify({'error': 'Admin privileges required'}), 403
+        
+        # Add user_id to request context
+        request.current_user_id = user_id
         return f(*args, **kwargs)
     
     decorated_function.__name__ = f.__name__
