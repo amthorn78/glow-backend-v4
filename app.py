@@ -2263,6 +2263,41 @@ with app.app_context():
 # Railway deployment compatibility - no app.run() call
 # Gunicorn imports 'app' object directly
 
+
+@app.route('/api/admin/initialize', methods=['POST'])
+def initialize_admin():
+    """Initialize admin user - for deployment setup only"""
+    try:
+        # Check if admin already exists
+        admin = User.query.filter_by(email='admin@glow.com').first()
+        if admin:
+            return jsonify({'message': 'Admin user already exists', 'email': admin.email})
+        
+        # Create admin user
+        from werkzeug.security import generate_password_hash
+        admin = User(
+            email='admin@glow.com',
+            password_hash=generate_password_hash('admin123'),
+            first_name='Admin',
+            last_name='User',
+            status='approved',
+            is_admin=True
+        )
+        db.session.add(admin)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Admin user created successfully',
+            'email': admin.email,
+            'is_admin': admin.is_admin
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Admin initialization error: {e}")
+        return jsonify({'error': 'Failed to initialize admin user'}), 500
+
+
 if __name__ == '__main__':
     # Only for local development testing
     port = int(os.environ.get('PORT', 5000))
