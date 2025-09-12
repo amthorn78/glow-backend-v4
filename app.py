@@ -1454,9 +1454,33 @@ def update_birth_data():
             birth_data = BirthData(user_id=request.current_user_id)
             db.session.add(birth_data)
         
-        # Update basic birth data
-        birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
-        birth_data.birth_time = datetime.strptime(birth_data_input['birth_time'], '%H:%M').time()
+        # Update basic birth data with improved parsing
+        try:
+            birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
+        except ValueError as e:
+            return jsonify({'error': f'Invalid birth date format. Expected YYYY-MM-DD, got: {birth_data_input["birth_date"]}'}), 400
+        
+        # Handle various time formats
+        birth_time_str = birth_data_input['birth_time']
+        try:
+            # Try parsing with zero-padded format first
+            birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M').time()
+        except ValueError:
+            try:
+                # Try parsing without zero-padding (e.g., "2:28")
+                parts = birth_time_str.split(':')
+                if len(parts) == 2:
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        birth_data.birth_time = datetime.time(hour, minute)
+                    else:
+                        raise ValueError("Hour must be 0-23, minute must be 0-59")
+                else:
+                    raise ValueError("Time must be in HH:MM format")
+            except (ValueError, IndexError) as e:
+                return jsonify({'error': f'Invalid birth time format. Expected HH:MM, got: {birth_time_str}'}), 400
+        
         birth_data.birth_location = birth_data_input['birth_location']
         birth_data.data_consent = True
         
