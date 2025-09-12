@@ -7,9 +7,6 @@ Production deployment entry point for the GLOW dating app backend
 import sys
 import os
 
-# Add the parent directory to the Python path to import app
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from app import app
 
 if __name__ == '__main__':
