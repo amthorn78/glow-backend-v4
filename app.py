@@ -2264,6 +2264,47 @@ with app.app_context():
 # Gunicorn imports 'app' object directly
 
 
+@app.route('/api/admin/migrate-database', methods=['POST'])
+def migrate_database():
+    """Add missing is_admin column to production database"""
+    try:
+        # Check if column already exists
+        result = db.session.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'users' AND column_name = 'is_admin'
+        """)).fetchone()
+        
+        if result:
+            return jsonify({'message': 'is_admin column already exists'})
+        
+        # Add the is_admin column
+        db.session.execute(text("""
+            ALTER TABLE users 
+            ADD COLUMN is_admin BOOLEAN DEFAULT FALSE NOT NULL
+        """))
+        
+        # Set admin@glow.app as admin
+        db.session.execute(text("""
+            UPDATE users 
+            SET is_admin = TRUE 
+            WHERE email = 'admin@glow.app'
+        """))
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Successfully added is_admin column and set admin@glow.app as admin',
+            'migration': 'completed'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'error': str(e),
+            'migration': 'failed'
+        }), 500
+
 @app.route('/api/test/database', methods=['GET'])
 def test_database():
     """Test database connectivity and basic operations"""
