@@ -84,11 +84,12 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # Auth v2 Session Configuration
-    SESSION_TYPE = 'redis'  # Use Redis for session storage
+    # Use filesystem sessions for Flask-Session (we have our own Redis store)
+    SESSION_TYPE = 'filesystem'  # Always use filesystem for Flask-Session
     SESSION_PERMANENT = True
     SESSION_USE_SIGNER = True
     SESSION_KEY_PREFIX = 'glow:'
-    SESSION_REDIS = None  # Will be set up after Redis connection
+    SESSION_FILE_DIR = '/tmp/glow_flask_sessions'  # Flask-Session filesystem dir
     
     # Cookie Configuration (Auth v2 spec)
     SESSION_COOKIE_NAME = 'glow_session'
@@ -156,19 +157,7 @@ app.config.from_object(Config)
 db = SQLAlchemy()
 db.init_app(app)
 
-# Initialize Auth v2 components
-# Set up Redis connection for sessions
-try:
-    redis_client = redis.from_url(app.config['REDIS_URL'])
-    redis_client.ping()  # Test connection
-    app.config['SESSION_REDIS'] = redis_client
-    app.logger.info("Redis connection established for sessions")
-except Exception as e:
-    app.logger.warning(f"Redis connection failed, falling back to filesystem sessions: {e}")
-    app.config['SESSION_TYPE'] = 'filesystem'
-    app.config['SESSION_FILE_DIR'] = '/tmp/glow_sessions'
-
-# Initialize Flask-Session
+# Initialize Flask-Session (filesystem for cookie management)
 sess = Session()
 sess.init_app(app)
 
