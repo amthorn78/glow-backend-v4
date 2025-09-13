@@ -145,9 +145,14 @@ def add_cors_headers(resp):
         resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return resp
 
+@app.route("/api/auth/login", methods=["OPTIONS"])
+def login_preflight():
+    return ("", 204)
+
 @app.route("/api/<path:any_path>", methods=["OPTIONS"])
 def api_preflight(any_path):
     return ("", 204)
+
 
 
 # ============================================================================
