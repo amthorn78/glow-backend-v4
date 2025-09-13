@@ -129,12 +129,17 @@ allowed_origins = [
 
 CORS(
     app,
-    resources={r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]}},
+    resources={
+        r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]},
+        r"/api/config/resonance": {"origins": [re.compile(p) for p in allowed_origins]},
+        r"/api/profile/birth-data": {"origins": [re.compile(p) for p in allowed_origins]},
+    },
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     expose_headers=["Content-Length"],
 )
+
 
 # Always return CORS headers, even on 4xx/5xx
 @app.after_request
