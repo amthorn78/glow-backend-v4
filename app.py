@@ -2031,6 +2031,10 @@ def update_birth_data():
         data = request.get_json()
         print(f"[DEBUG] Raw request data: {data}")
         
+        # Initialize variables to avoid scope issues
+        birth_data_input = None
+        validated_data = None
+        
         # Import validation schema
         from birth_data_schema import validate_birth_data
         
@@ -2156,8 +2160,8 @@ def update_birth_data():
         # Note: Compatibility data is now handled by HumanDesignData model
         # birth_data only stores basic birth information
         
-        # Mark onboarding as completed if specified
-        if birth_data_input.get('onboarding_completed'):
+        # Mark onboarding as completed if specified (only for legacy format)
+        if birth_data_input and birth_data_input.get('onboarding_completed'):
             user = User.query.get(request.current_user_id)
             user.onboarding_completed = True
         
