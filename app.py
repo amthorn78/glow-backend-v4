@@ -2125,6 +2125,7 @@ def auth_v2_me():
         return response, 500
 
 @app.route('/api/auth/logout', methods=['POST'])
+@csrf_protect(session_store, validate_auth_session)
 def auth_v2_logout():
     """Auth v2 Logout - Session invalidation"""
     try:
