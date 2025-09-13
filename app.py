@@ -2051,26 +2051,29 @@ def update_birth_data():
             validated_data = None
         else:
             print("[DEBUG] Detected structured format, validating...")
-            # New structured format - validate with Pydantic
+            # New structured format - validate with Pydantic (with fallback)
             try:
-                validated_data = validate_birth_data(data)
-                print(f"[DEBUG] Validation successful: {validated_data}")
-            except ValueError as e:
-                print(f"[DEBUG] Validation failed: {e}")
-                error_msg = str(e)
-                if "Validation failed:" in error_msg:
-                    # Extract field-specific errors
-                    import ast
-                    try:
-                        error_dict = ast.literal_eval(error_msg.split("Validation failed: ")[1])
-                        print(f"[DEBUG] Parsed validation errors: {error_dict}")
-                        return jsonify({'errors': error_dict, 'success': False}), 400
-                    except Exception as parse_error:
-                        print(f"[DEBUG] Error parsing validation errors: {parse_error}")
-                        pass
-                return jsonify({'error': error_msg, 'success': False}), 400
+                # Try Pydantic validation first
+                try:
+                    from pydantic import ValidationError
+                    validated_data = validate_birth_data(data)
+                    print(f"[DEBUG] Pydantic validation successful: {validated_data}")
+                except ImportError:
+                    print("[DEBUG] Pydantic not available, using fallback validation")
+                    # Fallback validation without Pydantic
+                    from fallback_validation import validate_birth_data_fallback
+                    validated_data = validate_birth_data_fallback(data)
+                    print(f"[DEBUG] Fallback validation successful: {validated_data}")
+                except ValidationError as ve:
+                    print(f"[DEBUG] Pydantic validation failed: {ve.errors()}")
+                    # Return 422 with detailed field errors (not 500)
+                    return jsonify({
+                        'success': False,
+                        'errors': ve.errors(),
+                        'message': 'Validation failed'
+                    }), 422
             except Exception as e:
-                print(f"[DEBUG] Unexpected validation error: {e}")
+                print(f"[DEBUG] Validation error: {e}")
                 return jsonify({'error': f'Validation error: {str(e)}', 'success': False}), 400
         
         print(f"[DEBUG] Getting birth data record for user {request.current_user_id}")

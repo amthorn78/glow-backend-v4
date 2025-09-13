@@ -1,9 +1,12 @@
-from pydantic import BaseModel, validator, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator, ConfigDict
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 import calendar
 
 class BirthDataSchema(BaseModel):
+    # Accept camelCase from frontend; expose snake_case in code
+    model_config = ConfigDict(populate_by_name=True, extra='ignore')  # Allow extra fields for now
+    
     year: int = Field(..., ge=1880, le=2100, description="Birth year")
     month: int = Field(..., ge=1, le=12, description="Birth month (1-12)")
     day: int = Field(..., ge=1, le=31, description="Birth day")
@@ -13,29 +16,33 @@ class BirthDataSchema(BaseModel):
     lat: float = Field(..., ge=-90, le=90, description="Latitude")
     lng: float = Field(..., ge=-180, le=180, description="Longitude")
     location: str = Field(..., min_length=1, description="Birth location display name")
+    unknown_time: Optional[bool] = Field(False, alias="unknownTime", description="Whether birth time is unknown")
 
-    @validator('day')
-    def validate_day_for_month_year(cls, day, values):
-        """Validate that the day is valid for the given month and year"""
-        if 'year' in values and 'month' in values:
-            year = values['year']
-            month = values['month']
-            
-            # Get the maximum day for this month/year (handles leap years)
-            max_day = calendar.monthrange(year, month)[1]
-            
-            if day > max_day:
-                month_names = [
-                    '', 'January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'
-                ]
-                raise ValueError(f"Invalid day {day} for {month_names[month]} {year}")
+    @model_validator(mode="after")
+    def validate_cross_fields(self):
+        """Validate cross-field constraints and timezone"""
+        # Enforce "time is required" (no unknown time allowed)
+        if self.unknown_time:
+            raise ValueError("unknownTime is not allowed; birth time is required.")
         
-        return day
+        # Validate real calendar date (handles leap years)
+        try:
+            date(self.year, self.month, self.day)
+        except ValueError:
+            raise ValueError(f"Invalid calendar date: {self.year}-{self.month:02d}-{self.day:02d}")
+        
+        # Validate the timezone exists
+        try:
+            from zoneinfo import ZoneInfo  # Python 3.9+
+            ZoneInfo(self.tz)
+        except Exception as e:
+            raise ValueError(f"Unknown IANA timezone: {self.tz}. Error: {str(e)}")
+        
+        return self
 
     def to_iso_date(self) -> str:
         """Convert to ISO date string (YYYY-MM-DD)"""
-        return f"{self.year}-{self.month:02d}-{self.day:02d}"
+        return f"{self.year:04d}-{self.month:02d}-{self.day:02d}"
 
     def to_iso_time(self) -> str:
         """Convert to ISO time string (HH:MM:SS)"""
@@ -71,21 +78,21 @@ def validate_birth_data(data: dict) -> BirthDataSchema:
         BirthDataSchema: Validated birth data object
         
     Raises:
-        ValueError: If validation fails
+        ValidationError: If validation fails with detailed field errors
     """
     try:
-        return BirthDataSchema(**data)
+        return BirthDataSchema.model_validate(data)
+    except ValidationError as e:
+        # Re-raise ValidationError to be handled by Flask endpoint
+        raise e
     except Exception as e:
-        # Convert Pydantic validation errors to a more user-friendly format
-        if hasattr(e, 'errors'):
-            error_messages = {}
-            for error in e.errors():
-                field = error['loc'][0] if error['loc'] else 'unknown'
-                message = error['msg']
-                error_messages[field] = message
-            
-            # Create a custom exception with field-specific errors
-            raise ValueError(f"Validation failed: {error_messages}")
-        else:
-            raise ValueError(f"Validation failed: {str(e)}")
+        # Convert other errors to ValidationError format
+        raise ValidationError.from_exception_data("BirthDataSchema", [
+            {
+                "type": "value_error",
+                "loc": ("__root__",),
+                "msg": str(e),
+                "input": data
+            }
+        ])
 
