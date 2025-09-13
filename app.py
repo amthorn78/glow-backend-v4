@@ -31,6 +31,7 @@ from resonance_config import (
     convert_legacy_to_resonance,
     convert_resonance_to_legacy
 )
+from resonance_scoring import ResonanceScorer, score_compatibility
 
 # ============================================================================
 # APPLICATION SETUP
@@ -109,12 +110,35 @@ app.config.from_object(Config)
 db = SQLAlchemy()
 db.init_app(app)
 
-# Configure CORS with explicit settings
-CORS(app, 
-     origins=Config.CORS_ORIGINS,
-     allow_headers=['Content-Type', 'Authorization'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-     supports_credentials=True)
+# Configure CORS with regex patterns for better security
+import re
+
+allowed_origins = [
+    r"^https://(www\.)?glowme\.io$",
+    r"^https://.*\.vercel\.app$",
+    r"^http://localhost:(3000|5173)$",  # Development
+]
+
+CORS(
+    app,
+    resources={r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]}},
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    expose_headers=["Content-Length"],
+)
+
+# Always return CORS headers, even on 4xx/5xx
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin")
+    if origin and resp.headers.get("Access-Control-Allow-Origin") is None:
+        # If path starts with /api, be permissive to avoid devtool confusion
+        if request.path.startswith("/api/"):
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+    return resp
 
 # ============================================================================
 # DATABASE MODELS
@@ -1725,7 +1749,7 @@ def update_user_priorities():
 # API ROUTES - RESONANCE TEN
 # ============================================================================
 
-@app.route('/config/resonance', methods=['GET'])
+@app.route('/api/config/resonance', methods=['GET'])
 def get_resonance_config_endpoint():
     """Get Resonance Ten configuration"""
     try:
@@ -1735,7 +1759,7 @@ def get_resonance_config_endpoint():
         print(f"Get resonance config error: {e}")
         return jsonify({'error': 'Failed to get configuration'}), 500
 
-@app.route('/me/resonance', methods=['GET'])
+@app.route('/api/me/resonance', methods=['GET'])
 @require_auth
 def get_user_resonance_prefs():
     """Get user's Resonance Ten preferences"""
@@ -1761,7 +1785,7 @@ def get_user_resonance_prefs():
         print(f"Get resonance prefs error: {e}")
         return jsonify({'error': 'Failed to get preferences'}), 500
 
-@app.route('/me/resonance', methods=['PUT'])
+@app.route('/api/me/resonance', methods=['PUT'])
 @require_auth
 def update_user_resonance_prefs():
     """Update user's Resonance Ten preferences"""
@@ -1806,6 +1830,41 @@ def update_user_resonance_prefs():
         db.session.rollback()
         print(f"Update resonance prefs error: {e}")
         return jsonify({'error': 'Failed to update preferences'}), 500
+
+# ============================================================================
+# TEMPORARY ALIASES (remove after frontend migration)
+# ============================================================================
+
+# Keep old paths working for zero downtime
+app.add_url_rule("/config/resonance", view_func=get_resonance_config_endpoint, methods=["GET"])
+app.add_url_rule("/me/resonance", view_func=get_user_resonance_prefs, methods=["GET"])
+app.add_url_rule("/me/resonance", view_func=update_user_resonance_prefs, methods=["PUT"])
+
+# ============================================================================
+# HEALTH CHECK ENDPOINT
+# ============================================================================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check with deployment info"""
+    import subprocess
+    try:
+        # Get git commit SHA if available
+        sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], 
+                                    stderr=subprocess.DEVNULL).decode().strip()
+    except:
+        sha = "unknown"
+    
+    return jsonify({
+        'ok': True,
+        'sha': sha,
+        'timestamp': datetime.utcnow().isoformat(),
+        'resonance_ten': True
+    })
+
+# ============================================================================
+# COMPATIBILITY ENDPOINTS
+# ============================================================================
 
 @app.route('/api/compatibility/calculate', methods=['POST'])
 @require_auth
