@@ -16,7 +16,7 @@ import logging
 import time as time_module
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_session import Session
 from flask_limiter import Limiter
@@ -50,6 +50,12 @@ except Exception as e:
 # Import Redis session store for T3.1-R2
 from redis_session_store import get_session_store
 from session_diagnostics import create_session_diagnostics_endpoint
+
+# Import CSRF protection for T3.2
+from csrf_protection import (
+    create_csrf_endpoints, add_csrf_to_login, clear_csrf_on_logout, 
+    csrf_protect, get_csrf_enforcement
+)
 
 # ============================================================================
 # APPLICATION SETUP
@@ -1890,8 +1896,20 @@ def auth_v2_login():
             'issued_at': datetime.utcnow().isoformat() + 'Z'
         }
         
+        # Create response and add CSRF token (T3.2)
+        response = make_response(jsonify(response_data))
+        
+        # Add CSRF token to session and cookie
+        session_id = session.get('session_id')
+        if session_id:
+            session_data = session_store.get_session(session_id)
+            if session_data:
+                session_data = add_csrf_to_login(session_data, response, app.logger)
+                # Update session with CSRF token
+                session_store.update_session(session_id, session_data)
+        
         app.logger.info(f"Login successful for user {user.id}")
-        return jsonify(response_data), 200
+        return response, 200
     
     except Exception as e:
         app.logger.error(f"Login error: {e}")
@@ -2115,10 +2133,15 @@ def auth_v2_logout():
         # Clear session regardless of validity
         clear_auth_session()
         
+        # Create response and clear CSRF cookie (T3.2)
+        response_data = {'ok': True}
+        response = make_response(jsonify(response_data))
+        
+        # Clear CSRF cookie on logout
+        clear_csrf_on_logout(response)
+        
         app.logger.info(f"Logout successful for user {user_id or 'unknown'}")
-        return jsonify({
-            'ok': True
-        }), 200
+        return response, 200
     
     except Exception as e:
         app.logger.error(f"Logout error: {e}")
@@ -2128,23 +2151,7 @@ def auth_v2_logout():
             'code': 'INTERNAL_ERROR'
         }), 500
 
-@app.route('/api/auth/csrf', methods=['GET'])
-def auth_v2_csrf():
-    """Auth v2 CSRF - Issue/refresh CSRF token (optional)"""
-    try:
-        # For now, just return success
-        # CSRF implementation can be added later if needed
-        return jsonify({
-            'ok': True
-        }), 200
-    
-    except Exception as e:
-        app.logger.error(f"CSRF error: {e}")
-        return jsonify({
-            'ok': False,
-            'error': 'CSRF token generation failed',
-            'code': 'INTERNAL_ERROR'
-        }), 500
+
 
 # ============================================================================
 # GLOBAL JSON ERROR HANDLERS
@@ -3512,6 +3519,12 @@ def initialize_admin():
 # ============================================================================
 # Create session diagnostics endpoints after all models and functions are defined
 create_session_diagnostics_endpoint(app, session_store, validate_auth_session)
+
+# ============================================================================
+# CSRF PROTECTION ENDPOINTS (T3.2)
+# ============================================================================
+# Create CSRF endpoints after all models and functions are defined
+create_csrf_endpoints(app, session_store, validate_auth_session)
 
 
 if __name__ == '__main__':

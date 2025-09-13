@@ -24,6 +24,10 @@ class SessionStore:
         """Get session data, return None if not found/expired"""
         raise NotImplementedError
     
+    def update_session(self, session_id: str, session_data: Dict) -> bool:
+        """Update session data, return success status"""
+        raise NotImplementedError
+    
     def touch_session(self, session_id: str) -> Dict:
         """Update last_seen, return renewal info"""
         raise NotImplementedError
@@ -86,6 +90,18 @@ class FilesystemSessionStore(SessionStore):
             return None
         
         return session_data
+    
+    def update_session(self, session_id: str, session_data: Dict) -> bool:
+        """Update session data in filesystem store"""
+        try:
+            if session_id in self.sessions:
+                self.sessions[session_id] = session_data
+                logger.info(f"Session updated: {session_id}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to update session {session_id}: {e}")
+            return False
     
     def touch_session(self, session_id: str) -> Dict:
         session_data = self.get_session(session_id)
@@ -205,6 +221,24 @@ class RedisSessionStore(SessionStore):
         except (redis.RedisError, ValueError, KeyError) as e:
             logger.error(f"Redis session get error: {e}")
             return None
+    
+    def update_session(self, session_id: str, session_data: Dict) -> bool:
+        """Update session data in Redis store"""
+        session_key = f"sess:{session_id}"
+        
+        try:
+            # Update all fields in the hash
+            pipe = self.redis_client.pipeline()
+            for key, value in session_data.items():
+                pipe.hset(session_key, key, str(value))
+            pipe.execute()
+            
+            logger.info(f"Redis session updated: {session_id}")
+            return True
+            
+        except redis.RedisError as e:
+            logger.error(f"Redis session update error: {e}")
+            return False
     
     def touch_session(self, session_id: str) -> Dict:
         session_data = self.get_session(session_id)
