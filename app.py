@@ -16,13 +16,19 @@ import logging
 import time as time_module
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
+from flask_session import Session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from sqlalchemy import text, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+import redis
 
 # Import Resonance Ten configuration
 from resonance_config import (
@@ -62,7 +68,7 @@ def _after_execute(conn, cursor, statement, parameters, context, executemany):
     app.logger.info("SQL_END: %.3f s", total)
 
 class Config:
-    """Railway-optimized configuration"""
+    """Railway-optimized configuration with Auth v2 session support"""
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'glow-dev-secret-key-change-in-production'
     
     # Database configuration with Railway URL handling
@@ -72,6 +78,30 @@ class Config:
     
     SQLALCHEMY_DATABASE_URI = DATABASE_URL or 'sqlite:///glow_dev.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # Auth v2 Session Configuration
+    SESSION_TYPE = 'redis'  # Use Redis for session storage
+    SESSION_PERMANENT = True
+    SESSION_USE_SIGNER = True
+    SESSION_KEY_PREFIX = 'glow:'
+    SESSION_REDIS = None  # Will be set up after Redis connection
+    
+    # Cookie Configuration (Auth v2 spec)
+    SESSION_COOKIE_NAME = 'glow_session'
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SECURE = True  # HTTPS only
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_PATH = '/'
+    SESSION_COOKIE_DOMAIN = None  # Host-only cookies (more secure)
+    PERMANENT_SESSION_LIFETIME = timedelta(minutes=30)  # 30-minute sliding timeout
+    
+    # Auth v2 Security Configuration
+    AUTH_ABSOLUTE_TIMEOUT = timedelta(hours=24)  # 24-hour absolute maximum
+    AUTH_RATE_LIMIT_PER_IP = "10 per minute"  # Rate limiting for login attempts
+    AUTH_RATE_LIMIT_PER_USER = "5 per minute"  # Per-user rate limiting
+    
+    # Redis Configuration
+    REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     
     # External API configuration
     MAILGUN_API_KEY = os.environ.get('MAILGUN_API_KEY')
@@ -108,15 +138,45 @@ class Config:
     if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('DATABASE_URL'):
         # Production environment
         CORS_ORIGINS = PRODUCTION_ORIGINS
+        # In production, ensure secure cookies
+        SESSION_COOKIE_SECURE = True
     else:
         # Development environment
         CORS_ORIGINS = DEVELOPMENT_ORIGINS
+        # In development, allow non-HTTPS
+        SESSION_COOKIE_SECURE = False
 
 app.config.from_object(Config)
 
 # Initialize extensions
 db = SQLAlchemy()
 db.init_app(app)
+
+# Initialize Auth v2 components
+# Set up Redis connection for sessions
+try:
+    redis_client = redis.from_url(app.config['REDIS_URL'])
+    redis_client.ping()  # Test connection
+    app.config['SESSION_REDIS'] = redis_client
+    app.logger.info("Redis connection established for sessions")
+except Exception as e:
+    app.logger.warning(f"Redis connection failed, falling back to filesystem sessions: {e}")
+    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config['SESSION_FILE_DIR'] = '/tmp/glow_sessions'
+
+# Initialize Flask-Session
+sess = Session()
+sess.init_app(app)
+
+# Initialize rate limiter
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["1000 per hour"]
+)
+
+# Initialize Argon2 password hasher
+ph = PasswordHasher()
 
 # Configure CORS with secure, production-ready setup
 import re
@@ -1657,74 +1717,317 @@ def register():
         print(f"Registration error: {e}")
         return jsonify({'error': 'Registration failed'}), 500
 
+# ============================================================================
+# AUTH v2 HELPER FUNCTIONS
+# ============================================================================
+
+def create_auth_session(user_id):
+    """Create a new authenticated session"""
+    try:
+        session.permanent = True
+        session['user_id'] = user_id
+        session['created_at'] = datetime.utcnow().isoformat()
+        session['last_seen_at'] = datetime.utcnow().isoformat()
+        
+        app.logger.info(f"Session created for user {user_id}")
+        return True
+    except Exception as e:
+        app.logger.error(f"Failed to create session: {e}")
+        return False
+
+def validate_auth_session():
+    """Validate current session and check timeouts"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return None, "AUTH_REQUIRED"
+        
+        # Check if session exists and get timestamps
+        created_at_str = session.get('created_at')
+        last_seen_str = session.get('last_seen_at')
+        
+        if not created_at_str or not last_seen_str:
+            session.clear()
+            return None, "SESSION_EXPIRED"
+        
+        created_at = datetime.fromisoformat(created_at_str)
+        last_seen = datetime.fromisoformat(last_seen_str)
+        now = datetime.utcnow()
+        
+        # Check absolute timeout (24 hours)
+        if now - created_at > app.config['AUTH_ABSOLUTE_TIMEOUT']:
+            session.clear()
+            app.logger.info(f"Session expired (absolute timeout) for user {user_id}")
+            return None, "SESSION_EXPIRED"
+        
+        # Check idle timeout (30 minutes)
+        if now - last_seen > app.config['PERMANENT_SESSION_LIFETIME']:
+            session.clear()
+            app.logger.info(f"Session expired (idle timeout) for user {user_id}")
+            return None, "SESSION_EXPIRED"
+        
+        # Update last seen time (sliding window)
+        session['last_seen_at'] = now.isoformat()
+        
+        return user_id, None
+    except Exception as e:
+        app.logger.error(f"Session validation error: {e}")
+        session.clear()
+        return None, "SESSION_EXPIRED"
+
+def clear_auth_session():
+    """Clear the current session"""
+    try:
+        user_id = session.get('user_id')
+        session.clear()
+        app.logger.info(f"Session cleared for user {user_id}")
+        return True
+    except Exception as e:
+        app.logger.error(f"Failed to clear session: {e}")
+        return False
+
+def hash_password_v2(password):
+    """Hash password using Argon2 (Auth v2)"""
+    try:
+        return ph.hash(password)
+    except Exception as e:
+        app.logger.error(f"Password hashing failed: {e}")
+        raise
+
+def verify_password_v2(password, password_hash):
+    """Verify password using Argon2 (Auth v2)"""
+    try:
+        ph.verify(password_hash, password)
+        return True
+    except VerifyMismatchError:
+        return False
+    except Exception as e:
+        app.logger.error(f"Password verification failed: {e}")
+        return False
+
+# ============================================================================
+# AUTH v2 ROUTES
+# ============================================================================
+
 @app.route('/api/auth/login', methods=['POST'])
-def login():
-    """User login endpoint"""
+@limiter.limit(app.config['AUTH_RATE_LIMIT_PER_IP'])
+def auth_v2_login():
+    """Auth v2 Login - Cookie-based session with JSON contracts"""
     try:
         ensure_database()
         
+        # Parse request
         data = request.get_json()
         if not data or not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password required'}), 400
+            return jsonify({
+                'ok': False,
+                'error': 'Email and password required',
+                'code': 'INVALID_REQUEST'
+            }), 400
+        
+        email = data['email'].lower().strip()
+        password = data['password']
+        
+        # Rate limiting log
+        app.logger.info(f"Login attempt for email: {hashlib.sha256(email.encode()).hexdigest()[:8]}")
         
         # Find user
-        user = User.query.filter_by(email=data['email'].lower().strip()).first()
-        if not user or not verify_password(data['password'], user.password_hash):
-            return jsonify({'error': 'Invalid credentials'}), 401
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            app.logger.info(f"Login failed: user not found for email hash {hashlib.sha256(email.encode()).hexdigest()[:8]}")
+            return jsonify({
+                'ok': False,
+                'error': 'Invalid credentials',
+                'code': 'INVALID_CREDENTIALS'
+            }), 401
+        
+        # Verify password (support both old and new hashing)
+        password_valid = False
+        if user.password_hash.startswith('$argon2'):
+            # New Argon2 hash
+            password_valid = verify_password_v2(password, user.password_hash)
+        else:
+            # Legacy Werkzeug hash - verify and upgrade
+            password_valid = check_password_hash(user.password_hash, password)
+            if password_valid:
+                # Upgrade to Argon2
+                user.password_hash = hash_password_v2(password)
+                db.session.commit()
+                app.logger.info(f"Password upgraded to Argon2 for user {user.id}")
+        
+        if not password_valid:
+            app.logger.info(f"Login failed: invalid password for user {user.id}")
+            return jsonify({
+                'ok': False,
+                'error': 'Invalid credentials',
+                'code': 'INVALID_CREDENTIALS'
+            }), 401
         
         # Check user status
         if user.status != 'approved':
-            return jsonify({'error': f'Account is {user.status}'}), 403
+            app.logger.info(f"Login failed: user {user.id} status is {user.status}")
+            return jsonify({
+                'ok': False,
+                'error': f'Account is {user.status}',
+                'code': 'ACCOUNT_NOT_APPROVED'
+            }), 403
         
-        # Create session token
-        token = create_session_token(user.id)
-        if not token:
-            return jsonify({'error': 'Failed to create session'}), 500
+        # Create session
+        if not create_auth_session(user.id):
+            return jsonify({
+                'ok': False,
+                'error': 'Failed to create session',
+                'code': 'SESSION_ERROR'
+            }), 500
         
+        # Success response (Auth v2 contract)
+        response_data = {
+            'ok': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'status': user.status,
+                'is_admin': user.is_admin
+            },
+            'issued_at': datetime.utcnow().isoformat() + 'Z'
+        }
+        
+        app.logger.info(f"Login successful for user {user.id}")
+        return jsonify(response_data), 200
+    
+    except Exception as e:
+        app.logger.error(f"Login error: {e}")
         return jsonify({
-            'message': 'Login successful',
-            'token': token,
-            'user': user.to_dict()
-        })
-    
-    except Exception as e:
-        print(f"Login error: {e}")
-        return jsonify({'error': 'Login failed'}), 500
-
-@app.route('/api/auth/logout', methods=['POST'])
-@require_auth
-def logout():
-    """User logout endpoint"""
-    try:
-        auth_header = request.headers.get('Authorization')
-        token = auth_header.split(' ')[1]
-        
-        # Delete session
-        session = UserSession.query.filter_by(session_token=token).first()
-        if session:
-            db.session.delete(session)
-            db.session.commit()
-        
-        return jsonify({'message': 'Logged out successfully'})
-    
-    except Exception as e:
-        print(f"Logout error: {e}")
-        return jsonify({'error': 'Logout failed'}), 500
+            'ok': False,
+            'error': 'Login failed',
+            'code': 'INTERNAL_ERROR'
+        }), 500
 
 @app.route('/api/auth/me', methods=['GET'])
-@require_auth
-def get_current_user():
-    """Get current user information"""
+def auth_v2_me():
+    """Auth v2 Me - Session validation and renewal"""
     try:
-        user = User.query.get(request.current_user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
+        user_id, error_code = validate_auth_session()
         
-        return jsonify({'user': user.to_dict()})
+        if not user_id:
+            app.logger.info(f"Me check failed: {error_code}")
+            return jsonify({
+                'ok': False,
+                'error': 'Authentication required',
+                'code': error_code
+            }), 401
+        
+        # Get user data
+        user = User.query.get(user_id)
+        if not user:
+            session.clear()
+            app.logger.error(f"Me check failed: user {user_id} not found")
+            return jsonify({
+                'ok': False,
+                'error': 'User not found',
+                'code': 'USER_NOT_FOUND'
+            }), 401
+        
+        # Success response
+        response_data = {
+            'ok': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'status': user.status,
+                'is_admin': user.is_admin,
+                'first_name': getattr(user, 'first_name', ''),
+                'last_name': getattr(user, 'last_name', '')
+            }
+        }
+        
+        app.logger.info(f"Me check successful for user {user_id}, session renewed")
+        return jsonify(response_data), 200
     
     except Exception as e:
-        print(f"Get current user error: {e}")
-        return jsonify({'error': 'Failed to get user information'}), 500
+        app.logger.error(f"Me check error: {e}")
+        return jsonify({
+            'ok': False,
+            'error': 'Authentication check failed',
+            'code': 'INTERNAL_ERROR'
+        }), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_v2_logout():
+    """Auth v2 Logout - Session invalidation"""
+    try:
+        user_id = session.get('user_id')
+        
+        # Clear session regardless of validity
+        clear_auth_session()
+        
+        app.logger.info(f"Logout successful for user {user_id or 'unknown'}")
+        return jsonify({
+            'ok': True
+        }), 200
+    
+    except Exception as e:
+        app.logger.error(f"Logout error: {e}")
+        return jsonify({
+            'ok': False,
+            'error': 'Logout failed',
+            'code': 'INTERNAL_ERROR'
+        }), 500
+
+@app.route('/api/auth/csrf', methods=['GET'])
+def auth_v2_csrf():
+    """Auth v2 CSRF - Issue/refresh CSRF token (optional)"""
+    try:
+        # For now, just return success
+        # CSRF implementation can be added later if needed
+        return jsonify({
+            'ok': True
+        }), 200
+    
+    except Exception as e:
+        app.logger.error(f"CSRF error: {e}")
+        return jsonify({
+            'ok': False,
+            'error': 'CSRF token generation failed',
+            'code': 'INTERNAL_ERROR'
+        }), 500
+
+# ============================================================================
+# GLOBAL JSON ERROR HANDLERS
+# ============================================================================
+
+@app.errorhandler(404)
+def not_found_error(error):
+    """Ensure 404s return JSON for API routes"""
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'ok': False,
+            'error': 'Endpoint not found',
+            'code': 'NOT_FOUND'
+        }), 404
+    return error
+
+@app.errorhandler(405)
+def method_not_allowed_error(error):
+    """Ensure 405s return JSON for API routes"""
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'ok': False,
+            'error': 'Method not allowed',
+            'code': 'METHOD_NOT_ALLOWED'
+        }), 405
+    return error
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Ensure 500s return JSON for API routes"""
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'ok': False,
+            'error': 'Internal server error',
+            'code': 'INTERNAL_ERROR'
+        }), 500
+    return error
 
 # ============================================================================
 # API ROUTES - MAGIC 10 MATCHING
