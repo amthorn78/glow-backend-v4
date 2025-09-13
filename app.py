@@ -1905,52 +1905,174 @@ def auth_v2_login():
 
 @app.route('/api/auth/me', methods=['GET'])
 def auth_v2_me():
-    """Auth v2 Me - Session validation and renewal"""
+    """Auth v2 Me - Enhanced session validation with complete user profile data and session management"""
+    start_time = time_module.time()
+    
     try:
+        # Set strict headers for security and caching
+        response_headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'Vary': 'Cookie'
+        }
+        
         user_id, error_code = validate_auth_session()
         
         if not user_id:
             app.logger.info(f"Me check failed: {error_code}")
-            return jsonify({
+            response = jsonify({
                 'ok': False,
                 'error': 'Authentication required',
-                'code': error_code
-            }), 401
+                'code': 'AUTH_REQUIRED'
+            })
+            for header, value in response_headers.items():
+                response.headers[header] = value
+            return response, 401
         
-        # Get user data
-        user = User.query.get(user_id)
-        if not user:
+        # Single optimized query with LEFT JOINs for all user data
+        query = db.session.query(
+            User.id,
+            User.email,
+            User.status,
+            User.is_admin,
+            User.updated_at,
+            User.profile_version,
+            UserProfile.display_name,
+            UserProfile.avatar_url,
+            UserProfile.bio,
+            UserProfile.age,
+            UserProfile.profile_completion,
+            BirthData.birth_date,
+            BirthData.birth_time,
+            BirthData.timezone,
+            BirthData.latitude,
+            BirthData.longitude,
+            BirthData.birth_location,
+            BirthData.birth_instant_utc,
+            BirthData.tz_offset_minutes
+        ).outerjoin(
+            UserProfile, User.id == UserProfile.user_id
+        ).outerjoin(
+            BirthData, User.id == BirthData.user_id
+        ).filter(User.id == user_id)
+        
+        result = query.first()
+        
+        if not result:
             session.clear()
             app.logger.error(f"Me check failed: user {user_id} not found")
-            return jsonify({
+            response = jsonify({
                 'ok': False,
                 'error': 'User not found',
                 'code': 'USER_NOT_FOUND'
-            }), 401
+            })
+            for header, value in response_headers.items():
+                response.headers[header] = value
+            return response, 401
         
-        # Success response
-        response_data = {
-            'ok': True,
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'status': user.status,
-                'is_admin': user.is_admin,
-                'first_name': getattr(user, 'first_name', ''),
-                'last_name': getattr(user, 'last_name', '')
+        # Unpack query result
+        (user_id, email, status, is_admin, updated_at, profile_version,
+         display_name, avatar_url, bio, age, profile_completion,
+         birth_date, birth_time, timezone, latitude, longitude, birth_location,
+         birth_instant_utc, tz_offset_minutes) = result
+        
+        # Session management and renewal logic
+        now = datetime.utcnow()
+        session_renewed = False
+        
+        # Get session metadata
+        session_id = session.get('session_id', 'unknown')
+        last_seen = session.get('last_seen', now)
+        if isinstance(last_seen, str):
+            last_seen = datetime.fromisoformat(last_seen.replace('Z', ''))
+        
+        # Calculate session expiry times
+        idle_timeout_minutes = 30
+        absolute_timeout_hours = 24
+        renewal_threshold_minutes = 10
+        
+        idle_expires_at = last_seen + timedelta(minutes=idle_timeout_minutes)
+        absolute_expires_at = session.get('created_at', now)
+        if isinstance(absolute_expires_at, str):
+            absolute_expires_at = datetime.fromisoformat(absolute_expires_at.replace('Z', ''))
+        absolute_expires_at = absolute_expires_at + timedelta(hours=absolute_timeout_hours)
+        
+        # Check if session renewal is needed (within 10 minutes of idle expiry)
+        time_until_idle_expiry = idle_expires_at - now
+        if time_until_idle_expiry.total_seconds() <= (renewal_threshold_minutes * 60):
+            # Renew session
+            session['last_seen'] = now.isoformat() + 'Z'
+            session_renewed = True
+            app.logger.info(f"Session renewed for user {user_id}")
+        
+        # Build complete user response with stable JSON shape
+        user_data = {
+            'id': user_id,
+            'email': email,
+            'status': status,
+            'is_admin': is_admin,
+            'updated_at': updated_at.isoformat() + 'Z' if updated_at else None,
+            'profile': {
+                'display_name': display_name,
+                'avatar_url': avatar_url,
+                'bio': bio,
+                'age': age,
+                'profile_completion': profile_completion
+            },
+            'birth_data': {
+                'date': birth_date.strftime('%Y-%m-%d') if birth_date else None,
+                'time': birth_time.strftime('%H:%M:%S') if birth_time else None,
+                'timezone': timezone,
+                'latitude': float(latitude) if latitude is not None else None,
+                'longitude': float(longitude) if longitude is not None else None,
+                'location': birth_location,
+                'birth_instant_utc': birth_instant_utc.isoformat() + 'Z' if birth_instant_utc else None,
+                'tz_offset_minutes': tz_offset_minutes
+            },
+            'profile_version': profile_version,
+            'session_meta': {
+                'session_id': session_id,
+                'last_seen': last_seen.isoformat() + 'Z',
+                'idle_expires_at': idle_expires_at.isoformat() + 'Z',
+                'absolute_expires_at': absolute_expires_at.isoformat() + 'Z',
+                'renewed': session_renewed
             }
         }
         
-        app.logger.info(f"Me check successful for user {user_id}, session renewed")
-        return jsonify(response_data), 200
+        # Success response with complete contract
+        response_data = {
+            'ok': True,
+            'contract_version': 1,
+            'issued_at': now.isoformat() + 'Z',
+            'user': user_data
+        }
+        
+        # Create response with headers
+        response = jsonify(response_data)
+        for header, value in response_headers.items():
+            response.headers[header] = value
+        
+        # Add Set-Cookie header if session was renewed
+        if session_renewed:
+            response.headers['Set-Cookie'] = f'glow_session={session.get("session_id", "")}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=1800'
+        
+        # Log performance and success
+        latency_ms = int((time_module.time() - start_time) * 1000)
+        app.logger.info(f"Me check successful for user {user_id}, renewed={session_renewed}, latency={latency_ms}ms, profile_version={profile_version}")
+        
+        return response, 200
     
     except Exception as e:
-        app.logger.error(f"Me check error: {e}")
-        return jsonify({
+        latency_ms = int((time_module.time() - start_time) * 1000)
+        app.logger.error(f"Me check error: {e}, latency={latency_ms}ms")
+        response = jsonify({
             'ok': False,
             'error': 'Authentication check failed',
             'code': 'INTERNAL_ERROR'
-        }), 500
+        })
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 500
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_v2_logout():
