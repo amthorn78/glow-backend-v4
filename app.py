@@ -12,11 +12,15 @@ import json
 import hashlib
 import secrets
 import requests
-from datetime import datetime, timedelta
+import logging
+import time as time_module
+from datetime import datetime, timedelta, date, time
 from decimal import Decimal
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
+from sqlalchemy import text, event
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -24,6 +28,21 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # APPLICATION SETUP
 # ============================================================================
 app = Flask(__name__)
+
+# Enable SQL logging for debugging
+app.config["SQLALCHEMY_ECHO"] = True
+logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
+
+# SQL timing and debugging events
+@event.listens_for(Engine, "before_cursor_execute")
+def _before_execute(conn, cursor, statement, parameters, context, executemany):
+    conn.info.setdefault("query_start_time", []).append(time_module.time())
+    app.logger.info("SQL_START: %s ; params=%s", statement, parameters)
+
+@event.listens_for(Engine, "after_cursor_execute")
+def _after_execute(conn, cursor, statement, parameters, context, executemany):
+    total = time_module.time() - conn.info["query_start_time"].pop(-1)
+    app.logger.info("SQL_END: %.3f s", total)
 
 class Config:
     """Railway-optimized configuration"""
@@ -2096,21 +2115,24 @@ def update_birth_data():
             # Compose ISO date/time strings ONLY AFTER validation
             birth_date_str = validated_data.to_iso_date()
             birth_time_str = validated_data.to_iso_time()
-            print(f"[DEBUG] Composed date: {birth_date_str}, time: {birth_time_str}")
-            
+            print(f"[DEBUG        # Process validated data using ChatGPT's transactional approach
+        if validated_data:
+            print("[DEBUG] Using structured format with transactional save")
             try:
-                # Parse the validated strings
-                birth_data.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
-                birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M:%S').time()  # Always required now
-                birth_data.birth_location = validated_data.location
-                birth_data.latitude = validated_data.lat
-                birth_data.longitude = validated_data.lng
-                birth_data.timezone = validated_data.tz
-                birth_data.data_consent = True
-                print("[DEBUG] Successfully set birth data fields")
+                from birth_data_saver import save_birth_data_transactional
+                saved_data = save_birth_data_transactional(db, BirthData, request.current_user_id, validated_data)
+                print(f"[DEBUG] Transactional save successful: {saved_data}")
+                
+                # Skip the rest of the processing since transactional save handles everything
+                return jsonify({
+                    'success': True,
+                    'message': 'Birth data updated successfully',
+                    'birth_data': saved_data
+                }), 200
+                
             except Exception as e:
-                print(f"[DEBUG] Error setting birth data fields: {e}")
-                return jsonify({'error': f'Error processing validated data: {str(e)}', 'success': False}), 400
+                print(f"[DEBUG] Transactional save failed: {e}")
+                return jsonify({'error': f'Error saving validated data: {str(e)}', 'success': False}), 400
             
         else:
             # Legacy format - existing parsing logic
