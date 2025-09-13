@@ -2113,9 +2113,7 @@ def update_birth_data():
             print("[DEBUG] Processing structured format data")
             # New structured format - use validated data
             # Compose ISO date/time strings ONLY AFTER validation
-            birth_date_str = validated_data.to_iso_date()
-            birth_time_str = validated_data.to_iso_time()
-            print(f"[DEBUG        # Process validated data using ChatGPT's transactional approach
+        # Process validated data using ChatGPT's transactional approach
         if validated_data:
             print("[DEBUG] Using structured format with transactional save")
             try:
