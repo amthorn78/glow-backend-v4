@@ -2026,16 +2026,41 @@ def get_profile_human_design():
 @app.route('/api/profile/update-birth-data', methods=['POST'])
 @require_auth
 def update_birth_data():
-    """Update user birth data with enhanced location support and recalculate compatibility"""
+    """Update user birth data with structured validation and enhanced location support"""
     try:
         data = request.get_json()
-        birth_data_input = data.get('birth_data', {})
         
-        # Validate required fields
-        required_fields = ['birth_date', 'birth_time', 'birth_location']
-        for field in required_fields:
-            if not birth_data_input.get(field):
-                return jsonify({'error': f'Missing required field: {field}'}), 400
+        # Import validation schema
+        from birth_data_schema import validate_birth_data
+        
+        # Check if we're receiving structured data (new format) or legacy format
+        if 'birth_data' in data and isinstance(data['birth_data'], dict) and 'birth_date' in data['birth_data']:
+            # Legacy format - convert to structured format for validation
+            birth_data_input = data['birth_data']
+            
+            # Basic validation for legacy format
+            required_fields = ['birth_date', 'birth_location']
+            for field in required_fields:
+                if not birth_data_input.get(field):
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+            
+            # Skip structured validation for legacy format
+            validated_data = None
+        else:
+            # New structured format - validate with Pydantic
+            try:
+                validated_data = validate_birth_data(data)
+            except ValueError as e:
+                error_msg = str(e)
+                if "Validation failed:" in error_msg:
+                    # Extract field-specific errors
+                    import ast
+                    try:
+                        error_dict = ast.literal_eval(error_msg.split("Validation failed: ")[1])
+                        return jsonify({'errors': error_dict, 'success': False}), 400
+                    except:
+                        pass
+                return jsonify({'error': error_msg, 'success': False}), 400
         
         # Get or create birth data record
         birth_data = BirthData.query.get(request.current_user_id)
@@ -2043,67 +2068,65 @@ def update_birth_data():
             birth_data = BirthData(user_id=request.current_user_id)
             db.session.add(birth_data)
         
-        # Update basic birth data with improved parsing
-        try:
-            birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
-        except ValueError as e:
-            return jsonify({'error': f'Invalid birth date format. Expected YYYY-MM-DD, got: {birth_data_input["birth_date"]}'}), 400
-        
-        # Verify user is 18+ years old
-        today = datetime.now().date()
-        age = today.year - birth_data.birth_date.year - ((today.month, today.day) < (birth_data.birth_date.month, birth_data.birth_date.day))
-        if age < 18:
-            return jsonify({'error': 'You must be at least 18 years old to use this service'}), 400
-        
-        # Handle various time formats
-        birth_time_str = birth_data_input['birth_time']
-        try:
-            # Try parsing with zero-padded format first
-            birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M').time()
-        except ValueError:
+        if validated_data:
+            # New structured format - use validated data
+            # Compose ISO date/time strings ONLY AFTER validation
+            birth_date_str = validated_data.to_iso_date()
+            birth_time_str = validated_data.to_iso_time()
+            
+            # Parse the validated strings
+            birth_data.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+            birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M:%S').time() if birth_time_str else None
+            birth_data.birth_location = validated_data.location
+            birth_data.latitude = validated_data.lat
+            birth_data.longitude = validated_data.lng
+            birth_data.timezone = validated_data.tz
+            birth_data.data_consent = True
+            
+        else:
+            # Legacy format - existing parsing logic
             try:
-                # Try parsing without zero-padding (e.g., "2:28")
-                parts = birth_time_str.split(':')
-                if len(parts) == 2:
-                    hour = int(parts[0])
-                    minute = int(parts[1])
-                    if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        birth_data.birth_time = datetime.time(hour, minute)
-                    else:
-                        raise ValueError("Hour must be 0-23, minute must be 0-59")
-                else:
-                    raise ValueError("Time must be in HH:MM format")
-            except (ValueError, IndexError) as e:
-                return jsonify({'error': f'Invalid birth time format. Expected HH:MM, got: {birth_time_str}'}), 400
-        
-        birth_data.birth_location = birth_data_input['birth_location']
-        birth_data.data_consent = True
-        
-        # Update enhanced location fields from OpenStreetMap Nominatim
-        if 'location_data' in birth_data_input:
-            location_data = birth_data_input['location_data']
+                birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
+            except ValueError as e:
+                return jsonify({'error': f'Invalid birth date format. Expected YYYY-MM-DD, got: {birth_data_input["birth_date"]}'}), 400
             
-            # Store enhanced location information
-            birth_data.location_display_name = location_data.get('display_name')
-            birth_data.location_country = location_data.get('country')
-            birth_data.location_state = location_data.get('state')
-            birth_data.location_city = location_data.get('city')
-            birth_data.location_importance = location_data.get('importance')
-            birth_data.location_osm_id = location_data.get('osm_id')
-            birth_data.location_osm_type = location_data.get('osm_type')
-            birth_data.timezone = location_data.get('timezone')
-            birth_data.location_source = location_data.get('source', 'nominatim')
-            birth_data.location_verified = location_data.get('verified', True)
+            # Verify user is 18+ years old
+            today = datetime.now().date()
+            age = today.year - birth_data.birth_date.year - ((today.month, today.day) < (birth_data.birth_date.month, birth_data.birth_date.day))
+            if age < 18:
+                return jsonify({'error': 'You must be at least 18 years old to use this service'}), 400
             
-            # Store coordinates if provided
-            if 'lat' in location_data and 'lon' in location_data:
-                birth_data.latitude = location_data['lat']
-                birth_data.longitude = location_data['lon']
-        
-        # Handle legacy coordinate data (for backward compatibility)
-        if 'latitude' in birth_data_input and 'longitude' in birth_data_input:
-            birth_data.latitude = birth_data_input['latitude']
-            birth_data.longitude = birth_data_input['longitude']
+            # Handle various time formats
+            birth_time_str = birth_data_input.get('birth_time')
+            if birth_time_str:
+                try:
+                    # Try parsing with zero-padded format first
+                    birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M').time()
+                except ValueError:
+                    try:
+                        # Try parsing without zero-padding (e.g., "2:28")
+                        parts = birth_time_str.split(':')
+                        if len(parts) == 2:
+                            hour = int(parts[0])
+                            minute = int(parts[1])
+                            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                                birth_data.birth_time = datetime.time(hour, minute)
+                            else:
+                                raise ValueError("Hour must be 0-23, minute must be 0-59")
+                        else:
+                            raise ValueError("Time must be in HH:MM format")
+                    except (ValueError, IndexError) as e:
+                        return jsonify({'error': f'Invalid birth time format. Expected HH:MM, got: {birth_time_str}'}), 400
+            else:
+                birth_data.birth_time = None
+            
+            birth_data.birth_location = birth_data_input['birth_location']
+            birth_data.data_consent = True
+            
+            # Handle coordinates for legacy format
+            if 'latitude' in birth_data_input and 'longitude' in birth_data_input:
+                birth_data.latitude = birth_data_input['latitude']
+                birth_data.longitude = birth_data_input['longitude']
         
         # Note: Compatibility data is now handled by HumanDesignData model
         # birth_data only stores basic birth information
