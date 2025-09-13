@@ -31,8 +31,15 @@ from resonance_config import (
     convert_legacy_to_resonance,
     convert_resonance_to_legacy
 )
-# TODO: Re-enable after adding numpy to requirements.txt
-# from resonance_scoring import ResonanceScorer, score_compatibility
+# Import scoring module with safety guard
+try:
+    from resonance_scoring import ResonanceScorer, score_compatibility
+except Exception as e:
+    # Log but don't kill the app; scoring endpoints can handle this gracefully
+    import logging
+    logging.getLogger(__name__).exception("Scoring module not fully available: %s", e)
+    ResonanceScorer = None
+    score_compatibility = None
 
 # ============================================================================
 # APPLICATION SETUP

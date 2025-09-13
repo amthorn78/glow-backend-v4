@@ -4,7 +4,16 @@ Sophisticated compatibility scoring with signal modulation
 """
 
 import math
-import numpy as np
+try:
+    import numpy as np
+except Exception as e:
+    np = None
+    _import_err = e
+
+def require_numpy():
+    if np is None:
+        raise RuntimeError(f"NumPy unavailable: {_import_err}")
+
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from resonance_config import get_resonance_config
@@ -148,7 +157,7 @@ class ResonanceScorer:
         return modulated_scores
     
     def calculate_confidence(self, user1_data: Dict, user2_data: Dict) -> float:
-        """Calculate overall confidence in the compatibility score"""
+        """Calculate overal        # Apply overall type compatibility
         confidence_factors = []
         
         # Birth time accuracy
@@ -172,6 +181,7 @@ class ResonanceScorer:
             hd_completeness = 1.0 if hd_data.get('type') else 0.5
             confidence_factors.append(hd_completeness)
         
+        require_numpy()
         return np.mean(confidence_factors)
     
     def generate_insights(self, scores: Dict[str, float], 
