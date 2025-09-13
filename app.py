@@ -2003,45 +2003,39 @@ def auth_v2_me():
             birth_date = birth_time = timezone = latitude = longitude = birth_location = None
             birth_instant_utc = tz_offset_minutes = None
         
-        # Session management and renewal logic
+        # Session management and renewal logic using Redis session data
         now = datetime.utcnow()
         session_renewed = False
         
-        # Get session metadata safely
-        session_id = session.get('session_id', f'sess_{user_id}_{int(now.timestamp())}')
-        
-        # Use existing session key names
-        created_at_str = session.get('created_at', now.isoformat())
-        last_seen_str = session.get('last_seen_at', now.isoformat())
-        
-        try:
-            if isinstance(created_at_str, str):
-                created_at = datetime.fromisoformat(created_at_str)
-            else:
-                created_at = created_at_str
+        # Get session metadata from Redis store (not Flask session)
+        session_id = session.get('session_id')
+        if session_id:
+            # Get session data from Redis store
+            redis_session_data = session_store.get_session(session_id)
+            if redis_session_data:
+                # Use Redis session data for metadata
+                created_at = datetime.fromisoformat(redis_session_data['created_at'].replace('Z', ''))
+                last_seen = datetime.fromisoformat(redis_session_data['last_seen'].replace('Z', ''))
                 
-            if isinstance(last_seen_str, str):
-                last_seen = datetime.fromisoformat(last_seen_str)
+                # Check if session was renewed during validation
+                touch_result = session_store.touch_session(session_id)
+                session_renewed = touch_result.get('renewed', False)
+                
+                # Use Redis session TTL for accurate idle time
+                idle_ttl_seconds = touch_result.get('idle_ttl_seconds', 1800)
+                idle_expires_at = now + timedelta(seconds=idle_ttl_seconds)
+                absolute_expires_at = datetime.fromisoformat(redis_session_data['absolute_expires_at'].replace('Z', ''))
             else:
-                last_seen = last_seen_str
-        except (ValueError, TypeError):
+                # Fallback if Redis session not found
+                created_at = last_seen = now
+                idle_expires_at = now + timedelta(minutes=30)
+                absolute_expires_at = now + timedelta(hours=24)
+        else:
+            # Fallback session metadata
+            session_id = f'sess_{user_id}_{int(now.timestamp())}'
             created_at = last_seen = now
-        
-        # Calculate session expiry times
-        idle_timeout_minutes = 30
-        absolute_timeout_hours = 24
-        renewal_threshold_minutes = 10
-        
-        idle_expires_at = last_seen + timedelta(minutes=idle_timeout_minutes)
-        absolute_expires_at = created_at + timedelta(hours=absolute_timeout_hours)
-        
-        # Check if session renewal is needed (within 10 minutes of idle expiry)
-        time_until_idle_expiry = idle_expires_at - now
-        if time_until_idle_expiry.total_seconds() <= (renewal_threshold_minutes * 60):
-            # Renew session
-            session['last_seen_at'] = now.isoformat()
-            session_renewed = True
-            app.logger.info(f"Session renewed for user {user_id}")
+            idle_expires_at = now + timedelta(minutes=30)
+            absolute_expires_at = now + timedelta(hours=24)
         
         # Build complete user response with stable JSON shape
         user_data = {
