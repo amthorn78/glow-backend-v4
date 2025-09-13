@@ -1852,24 +1852,6 @@ app.add_url_rule("/me/resonance", view_func=update_user_resonance_prefs, methods
 # HEALTH CHECK ENDPOINT
 # ============================================================================
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check with deployment info"""
-    import subprocess
-    try:
-        # Get git commit SHA if available
-        sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], 
-                                    stderr=subprocess.DEVNULL).decode().strip()
-    except:
-        sha = "unknown"
-    
-    return jsonify({
-        'ok': True,
-        'sha': sha,
-        'timestamp': datetime.utcnow().isoformat(),
-        'resonance_ten': True
-    })
-
 # ============================================================================
 # COMPATIBILITY ENDPOINTS
 # ============================================================================

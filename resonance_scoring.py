@@ -1,7 +1,5 @@
-"""
-Resonance Ten Scoring Service
-Sophisticated compatibility scoring with signal modulation
-"""
+# Resonance Ten Scoring Service
+# Sophisticated compatibility scoring with signal modulation
 
 import math
 try:
@@ -20,7 +18,7 @@ from resonance_config import get_resonance_config
 
 @dataclass
 class ResonanceSignal:
-    """Individual resonance signal with confidence and modulation"""
+    # Individual resonance signal with confidence and modulation
     dimension: str
     base_score: float  # 0.0 to 1.0
     confidence: float  # 0.0 to 1.0 (birth time accuracy, etc.)
@@ -29,7 +27,7 @@ class ResonanceSignal:
     
 @dataclass
 class CompatibilityResult:
-    """Complete compatibility analysis result"""
+    # Complete compatibility analysis result
     overall_score: float
     dimension_scores: Dict[str, ResonanceSignal]
     confidence_level: str
@@ -37,7 +35,7 @@ class CompatibilityResult:
     recommendations: List[str]
 
 class ResonanceScorer:
-    """Advanced scoring engine for Resonance Ten compatibility"""
+    # Advanced scoring engine for Resonance Ten compatibility
     
     def __init__(self):
         self.config = get_resonance_config()
@@ -76,7 +74,7 @@ class ResonanceScorer:
         }
     
     def compute_base_compatibility(self, user1_prefs: Dict, user2_prefs: Dict) -> Dict[str, float]:
-        """Compute base compatibility scores for each dimension"""
+        # Compute base compatibility scores for each dimension
         scores = {}
         
         for dimension in self.dimensions:
@@ -86,36 +84,29 @@ class ResonanceScorer:
                 pref2 = user2_prefs[dimension]
                 
                 # Calculate compatibility using preference alignment
-                # Higher scores when preferences are complementary or aligned
                 diff = abs(pref1 - pref2)
                 
                 # Different scoring strategies per dimension
                 if dimension in ['love', 'intimacy']:
-                    # For love/intimacy, closer alignment is better
                     score = max(0, 1.0 - (diff / 9.0))
                 elif dimension in ['communication', 'friendship']:
-                    # For communication/friendship, some difference can be good
                     score = 1.0 - (diff / 10.0) if diff <= 3 else 0.7 - (diff - 3) * 0.1
                 elif dimension in ['collaboration', 'decisions']:
-                    # For collaboration/decisions, moderate alignment preferred
                     score = 1.0 - (diff / 8.0) if diff <= 4 else 0.5
                 elif dimension in ['lifestyle', 'space']:
-                    # For lifestyle/space, some flexibility is good
                     score = max(0.3, 1.0 - (diff / 7.0))
                 else:  # support, growth
-                    # For support/growth, alignment is important
                     score = max(0.2, 1.0 - (diff / 8.0))
                 
                 scores[dimension] = max(0.0, min(1.0, score))
             else:
-                # Missing data - use neutral score
                 scores[dimension] = 0.5
         
         return scores
     
     def apply_hd_modulation(self, base_scores: Dict[str, float], 
                            user1_hd: Dict, user2_hd: Dict) -> Dict[str, float]:
-        """Apply Human Design modulation to base scores"""
+        # Apply Human Design modulation to base scores
         modulated_scores = base_scores.copy()
         
         # Get HD types
@@ -132,22 +123,15 @@ class ResonanceScorer:
             
             # Type-specific adjustments
             if dimension == 'communication':
-                # Projectors excel at communication
                 if 'Projector' in [type1, type2]:
                     modulated_scores[dimension] = min(1.0, base_score * 1.15)
-            
             elif dimension == 'collaboration':
-                # Generators work well together
                 if type1 == 'Generator' and type2 == 'Generator':
                     modulated_scores[dimension] = min(1.0, base_score * 1.2)
-            
             elif dimension == 'decisions':
-                # Manifestors are natural decision makers
                 if 'Manifestor' in [type1, type2]:
                     modulated_scores[dimension] = min(1.0, base_score * 1.1)
-            
             elif dimension == 'space':
-                # Reflectors need more space
                 if 'Reflector' in [type1, type2]:
                     modulated_scores[dimension] = min(1.0, base_score * 1.25)
             
@@ -157,7 +141,7 @@ class ResonanceScorer:
         return modulated_scores
     
     def calculate_confidence(self, user1_data: Dict, user2_data: Dict) -> float:
-        """Calculate overal        # Apply overall type compatibility
+        # Calculate overall confidence in the compatibility score
         confidence_factors = []
         
         # Birth time accuracy
@@ -186,7 +170,7 @@ class ResonanceScorer:
     
     def generate_insights(self, scores: Dict[str, float], 
                          user1_hd: Dict, user2_hd: Dict) -> List[str]:
-        """Generate Human Design insights for the compatibility"""
+        # Generate Human Design insights for the compatibility
         insights = []
         
         type1 = user1_hd.get('type', 'Unknown')
@@ -217,7 +201,7 @@ class ResonanceScorer:
         return insights
     
     def generate_recommendations(self, scores: Dict[str, float]) -> List[str]:
-        """Generate actionable recommendations based on scores"""
+        # Generate actionable recommendations based on scores
         recommendations = []
         
         # Find strongest and weakest dimensions
@@ -248,7 +232,7 @@ class ResonanceScorer:
         return recommendations
     
     def compute_compatibility(self, user1_data: Dict, user2_data: Dict) -> CompatibilityResult:
-        """Main method to compute full compatibility analysis"""
+        # Main method to compute full compatibility analysis
         
         # Extract data
         user1_prefs = user1_data.get('resonance_prefs', {})
@@ -309,7 +293,7 @@ class ResonanceScorer:
 
 # Utility functions for API integration
 def score_compatibility(user1_id: int, user2_id: int, db_session) -> Dict:
-    """Score compatibility between two users (for API endpoint)"""
+    # Score compatibility between two users (for API endpoint)
     scorer = ResonanceScorer()
     
     # This would fetch user data from database
