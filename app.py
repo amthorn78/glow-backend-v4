@@ -2029,12 +2029,14 @@ def update_birth_data():
     """Update user birth data with structured validation and enhanced location support"""
     try:
         data = request.get_json()
+        print(f"[DEBUG] Raw request data: {data}")
         
         # Import validation schema
         from birth_data_schema import validate_birth_data
         
         # Check if we're receiving structured data (new format) or legacy format
         if 'birth_data' in data and isinstance(data['birth_data'], dict) and 'birth_date' in data['birth_data']:
+            print("[DEBUG] Detected legacy format")
             # Legacy format - convert to structured format for validation
             birth_data_input = data['birth_data']
             
@@ -2042,46 +2044,66 @@ def update_birth_data():
             required_fields = ['birth_date', 'birth_location']
             for field in required_fields:
                 if not birth_data_input.get(field):
+                    print(f"[DEBUG] Missing legacy field: {field}")
                     return jsonify({'error': f'Missing required field: {field}'}), 400
             
             # Skip structured validation for legacy format
             validated_data = None
         else:
+            print("[DEBUG] Detected structured format, validating...")
             # New structured format - validate with Pydantic
             try:
                 validated_data = validate_birth_data(data)
+                print(f"[DEBUG] Validation successful: {validated_data}")
             except ValueError as e:
+                print(f"[DEBUG] Validation failed: {e}")
                 error_msg = str(e)
                 if "Validation failed:" in error_msg:
                     # Extract field-specific errors
                     import ast
                     try:
                         error_dict = ast.literal_eval(error_msg.split("Validation failed: ")[1])
+                        print(f"[DEBUG] Parsed validation errors: {error_dict}")
                         return jsonify({'errors': error_dict, 'success': False}), 400
-                    except:
+                    except Exception as parse_error:
+                        print(f"[DEBUG] Error parsing validation errors: {parse_error}")
                         pass
                 return jsonify({'error': error_msg, 'success': False}), 400
+            except Exception as e:
+                print(f"[DEBUG] Unexpected validation error: {e}")
+                return jsonify({'error': f'Validation error: {str(e)}', 'success': False}), 400
         
+        print(f"[DEBUG] Getting birth data record for user {request.current_user_id}")
         # Get or create birth data record
         birth_data = BirthData.query.get(request.current_user_id)
         if not birth_data:
+            print("[DEBUG] Creating new birth data record")
             birth_data = BirthData(user_id=request.current_user_id)
             db.session.add(birth_data)
+        else:
+            print("[DEBUG] Found existing birth data record")
         
         if validated_data:
+            print("[DEBUG] Processing structured format data")
             # New structured format - use validated data
             # Compose ISO date/time strings ONLY AFTER validation
             birth_date_str = validated_data.to_iso_date()
             birth_time_str = validated_data.to_iso_time()
+            print(f"[DEBUG] Composed date: {birth_date_str}, time: {birth_time_str}")
             
-            # Parse the validated strings
-            birth_data.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
-            birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M:%S').time() if birth_time_str else None
-            birth_data.birth_location = validated_data.location
-            birth_data.latitude = validated_data.lat
-            birth_data.longitude = validated_data.lng
-            birth_data.timezone = validated_data.tz
-            birth_data.data_consent = True
+            try:
+                # Parse the validated strings
+                birth_data.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M:%S').time()  # Always required now
+                birth_data.birth_location = validated_data.location
+                birth_data.latitude = validated_data.lat
+                birth_data.longitude = validated_data.lng
+                birth_data.timezone = validated_data.tz
+                birth_data.data_consent = True
+                print("[DEBUG] Successfully set birth data fields")
+            except Exception as e:
+                print(f"[DEBUG] Error setting birth data fields: {e}")
+                return jsonify({'error': f'Error processing validated data: {str(e)}', 'success': False}), 400
             
         else:
             # Legacy format - existing parsing logic
@@ -2195,8 +2217,12 @@ def update_birth_data():
     
     except Exception as e:
         db.session.rollback()
-        print(f"Update birth data error: {e}")
-        return jsonify({'error': 'Failed to update birth data'}), 500
+        print(f"[DEBUG] Update birth data error: {e}")
+        print(f"[DEBUG] Error type: {type(e).__name__}")
+        print(f"[DEBUG] Error details: {str(e)}")
+        import traceback
+        print(f"[DEBUG] Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Failed to update birth data: {str(e)}'}), 500
 
 # ============================================================================
 # API ROUTES - ADMIN CONSOLE

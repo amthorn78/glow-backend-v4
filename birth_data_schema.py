@@ -7,9 +7,8 @@ class BirthDataSchema(BaseModel):
     year: int = Field(..., ge=1880, le=2100, description="Birth year")
     month: int = Field(..., ge=1, le=12, description="Birth month (1-12)")
     day: int = Field(..., ge=1, le=31, description="Birth day")
-    hour: Optional[int] = Field(None, ge=0, le=23, description="Birth hour (0-23)")
-    minute: Optional[int] = Field(None, ge=0, le=59, description="Birth minute (0-59)")
-    unknownTime: bool = Field(False, description="Whether birth time is unknown")
+    hour: int = Field(..., ge=0, le=23, description="Birth hour (0-23)")
+    minute: int = Field(..., ge=0, le=59, description="Birth minute (0-59)")
     tz: str = Field(..., min_length=1, description="IANA timezone string")
     lat: float = Field(..., ge=-90, le=90, description="Latitude")
     lng: float = Field(..., ge=-180, le=180, description="Longitude")
@@ -34,30 +33,12 @@ class BirthDataSchema(BaseModel):
         
         return day
 
-    @validator('hour', 'minute')
-    def validate_time_fields(cls, value, values, field):
-        """Validate time fields based on unknownTime flag"""
-        unknown_time = values.get('unknownTime', False)
-        
-        if unknown_time:
-            # If time is unknown, hour and minute should be None
-            if value is not None:
-                raise ValueError(f"{field.name} must be null when unknownTime is true")
-        else:
-            # If time is known, hour and minute are required
-            if value is None:
-                raise ValueError(f"{field.name} is required when unknownTime is false")
-        
-        return value
-
     def to_iso_date(self) -> str:
         """Convert to ISO date string (YYYY-MM-DD)"""
         return f"{self.year}-{self.month:02d}-{self.day:02d}"
 
-    def to_iso_time(self) -> Optional[str]:
-        """Convert to ISO time string (HH:MM:SS) or None if unknown"""
-        if self.unknownTime or self.hour is None or self.minute is None:
-            return None
+    def to_iso_time(self) -> str:
+        """Convert to ISO time string (HH:MM:SS)"""
         return f"{self.hour:02d}:{self.minute:02d}:00"
 
     class Config:
@@ -72,7 +53,6 @@ class BirthDataSchema(BaseModel):
                 "day": 15,
                 "hour": 9,
                 "minute": 30,
-                "unknownTime": False,
                 "tz": "America/New_York",
                 "lat": 40.7128,
                 "lng": -74.0060,
