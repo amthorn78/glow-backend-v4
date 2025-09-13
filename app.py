@@ -129,29 +129,26 @@ allowed_origins = [
 
 CORS(
     app,
-    resources={
-        r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]},
-        r"/api/config/resonance": {"origins": [re.compile(p) for p in allowed_origins]},
-        r"/api/profile/birth-data": {"origins": [re.compile(p) for p in allowed_origins]},
-    },
+    resources={ r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]}},
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     expose_headers=["Content-Length"],
 )
 
-
-# Always return CORS headers, even on 4xx/5xx
 @app.after_request
 def add_cors_headers(resp):
     origin = request.headers.get("Origin")
-    if origin and resp.headers.get("Access-Control-Allow-Origin") is None:
-        # If path starts with /api, be permissive to avoid devtool confusion
-        if request.path.startswith("/api/"):
-            resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Vary"] = "Origin"
-            resp.headers["Access-Control-Allow-Credentials"] = "true"
+    if origin and request.path.startswith("/api/"):
+        resp.headers.setdefault("Access-Control-Allow-Origin", origin)
+        resp.headers.setdefault("Vary", "Origin")
+        resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return resp
+
+@app.route("/api/<path:any_path>", methods=["OPTIONS"])
+def api_preflight(any_path):
+    return ("", 204)
+
 
 # ============================================================================
 # DATABASE MODELS
