@@ -31,7 +31,8 @@ from resonance_config import (
     convert_legacy_to_resonance,
     convert_resonance_to_legacy
 )
-from resonance_scoring import ResonanceScorer, score_compatibility
+# TODO: Re-enable after adding numpy to requirements.txt
+# from resonance_scoring import ResonanceScorer, score_compatibility
 
 # ============================================================================
 # APPLICATION SETUP
