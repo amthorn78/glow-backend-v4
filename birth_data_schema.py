@@ -4,8 +4,24 @@ from datetime import datetime, date
 import calendar
 
 class BirthDataSchema(BaseModel):
-    # Accept camelCase from frontend; expose snake_case in code
-    model_config = ConfigDict(populate_by_name=True, extra='ignore')  # Allow extra fields for now
+    # Pydantic v2 configuration
+    model_config = ConfigDict(
+        populate_by_name=True, 
+        extra='ignore',
+        json_schema_extra={
+            "example": {
+                "year": 1984,
+                "month": 11,
+                "day": 15,
+                "hour": 9,
+                "minute": 30,
+                "tz": "America/New_York",
+                "lat": 40.7128,
+                "lng": -74.0060,
+                "location": "New York, NY, USA"
+            }
+        }
+    )
     
     year: int = Field(..., ge=1880, le=2100, description="Birth year")
     month: int = Field(..., ge=1, le=12, description="Birth month (1-12)")
@@ -47,25 +63,6 @@ class BirthDataSchema(BaseModel):
     def to_iso_time(self) -> str:
         """Convert to ISO time string (HH:MM:SS)"""
         return f"{self.hour:02d}:{self.minute:02d}:00"
-
-    class Config:
-        # Allow extra fields to be ignored (for forward compatibility)
-        extra = "ignore"
-        
-        # Example for documentation
-        schema_extra = {
-            "example": {
-                "year": 1984,
-                "month": 11,
-                "day": 15,
-                "hour": 9,
-                "minute": 30,
-                "tz": "America/New_York",
-                "lat": 40.7128,
-                "lng": -74.0060,
-                "location": "New York, NY, USA"
-            }
-        }
 
 def validate_birth_data(data: dict) -> BirthDataSchema:
     """
