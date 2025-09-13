@@ -22,3 +22,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+auth_v2_env/
+*.pyc
+__pycache__/
