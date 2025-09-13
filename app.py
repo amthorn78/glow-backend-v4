@@ -1726,7 +1726,7 @@ def update_user_priorities():
 # ============================================================================
 
 @app.route('/config/resonance', methods=['GET'])
-def get_resonance_config():
+def get_resonance_config_endpoint():
     """Get Resonance Ten configuration"""
     try:
         config = get_resonance_config()
