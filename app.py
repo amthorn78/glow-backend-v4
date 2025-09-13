@@ -118,41 +118,74 @@ app.config.from_object(Config)
 db = SQLAlchemy()
 db.init_app(app)
 
-# Configure CORS with regex patterns for better security
+# Configure CORS with secure, production-ready setup
 import re
+from flask import make_response
 
-allowed_origins = [
-    r"^https://(www\.)?glowme\.io$",
-    r"^https://.*\.vercel\.app$",
-    r"^http://localhost:(3000|5173)$",  # Development
+# Strict allowlist (compiled once)
+ALLOWED_ORIGIN_PATTERNS = [
+    re.compile(r"^https://(www\.)?glowme\.io$"),
+    re.compile(r"^https://.*\.vercel\.app$"),
+    re.compile(r"^http://localhost:(3000|5173)$"),  # Development only
 ]
 
+def origin_allowed(origin: str) -> bool:
+    """Check if origin is in our allowlist"""
+    if not origin:
+        return False
+    return any(pat.match(origin) for pat in ALLOWED_ORIGIN_PATTERNS)
+
+# Flask-CORS handles most cases
 CORS(
     app,
-    resources={ r"/api/*": {"origins": [re.compile(p) for p in allowed_origins]}},
+    resources={r"/api/*": {
+        "origins": ALLOWED_ORIGIN_PATTERNS   # same allowlist
+    }},
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     expose_headers=["Content-Length"],
 )
 
+# after_request: DO NOT open CORS; only add helpers if the origin is allowed
 @app.after_request
 def add_cors_headers(resp):
+    # Only touch /api/* and only for explicitly allowed origins
     origin = request.headers.get("Origin")
-    if origin and request.path.startswith("/api/"):
+    if request.path.startswith("/api/") and origin_allowed(origin):
+        # If Flask-CORS already set ACAO, leave it. Otherwise echo allowed origin.
         resp.headers.setdefault("Access-Control-Allow-Origin", origin)
         resp.headers.setdefault("Vary", "Origin")
         resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return resp
 
-@app.route("/api/auth/login", methods=["OPTIONS"])
-def login_preflight():
-    return ("", 204)
-
+# OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
 @app.route("/api/<path:any_path>", methods=["OPTIONS"])
 def api_preflight(any_path):
-    return ("", 204)
+    """Catch-all preflight handler for any /api/* path"""
+    origin = request.headers.get("Origin")
+    # If origin not allowed, return 204 WITHOUT ACAO so browser blocks it
+    if not origin_allowed(origin):
+        return ("", 204)
 
+    # Echo only what the browser asked for (spec-correct)
+    req_method  = request.headers.get("Access-Control-Request-Method", "GET")
+    req_headers = request.headers.get("Access-Control-Request-Headers", "")
+
+    resp = make_response("", 204)
+    resp.headers["Access-Control-Allow-Origin"] = origin
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    # It's okay to return a superset, but echoing is cleaner and prevents drift:
+    resp.headers["Access-Control-Allow-Methods"] = req_method if req_method else "GET, POST, PUT, DELETE, OPTIONS"
+    if req_headers:
+        resp.headers["Access-Control-Allow-Headers"] = req_headers
+    else:
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+
+    # Cache preflight (browsers may cap this; Safari often ~600s)
+    resp.headers["Access-Control-Max-Age"] = "86400"
+    resp.headers["Vary"] = "Origin"
+    return resp
 
 
 # ============================================================================
