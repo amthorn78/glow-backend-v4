@@ -24,6 +24,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Import Resonance Ten configuration
+from resonance_config import (
+    get_resonance_config, 
+    validate_resonance_weights,
+    convert_legacy_to_resonance,
+    convert_resonance_to_legacy
+)
+
 # ============================================================================
 # APPLICATION SETUP
 # ============================================================================
@@ -665,6 +673,72 @@ class UserSession(db.Model):
     
     def is_expired(self):
         return datetime.utcnow() > self.expires_at
+
+# ============================================================================
+# RESONANCE TEN MODELS
+# ============================================================================
+
+class UserResonancePrefs(db.Model):
+    """User preferences for Resonance Ten compatibility model"""
+    __tablename__ = 'user_resonance_prefs'
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    weights = db.Column(db.JSON, nullable=False)  # Dict[str, int] - 0-100 scale
+    facets = db.Column(db.JSON)  # Optional sub-facet preferences
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    def to_dict(self):
+        return {
+            'version': self.version,
+            'weights': self.weights or {},
+            'facets': self.facets or {},
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+class UserResonanceSignalsPrivate(db.Model):
+    """Private signals for Resonance Ten compatibility (backend only)"""
+    __tablename__ = 'user_resonance_signals_private'
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    decision_mode = db.Column(db.String(50), nullable=False)
+    interaction_mode = db.Column(db.String(50), nullable=False)
+    connection_style = db.Column(db.String(50), nullable=False)
+    bridges_count = db.Column(db.SmallInteger, nullable=False)
+    emotion_signal = db.Column(db.Boolean, nullable=False)
+    work_energy = db.Column(db.Boolean, nullable=False)
+    will_signal = db.Column(db.Boolean, nullable=False)
+    expression_signal = db.Column(db.Boolean, nullable=False)
+    mind_signal = db.Column(db.Boolean, nullable=False)
+    role_pattern = db.Column(db.String(50), nullable=False)
+    tempo_pattern = db.Column(db.String(50))
+    identity_openness = db.Column(db.Boolean, nullable=False)
+    trajectory_code = db.Column(db.String(20))
+    confidence = db.Column(db.JSON)  # Confidence scores for signal quality
+    computed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    def to_dict(self):
+        """Note: This should never be exposed to public APIs"""
+        return {
+            'user_id': self.user_id,
+            'decision_mode': self.decision_mode,
+            'interaction_mode': self.interaction_mode,
+            'connection_style': self.connection_style,
+            'bridges_count': self.bridges_count,
+            'emotion_signal': self.emotion_signal,
+            'work_energy': self.work_energy,
+            'will_signal': self.will_signal,
+            'expression_signal': self.expression_signal,
+            'mind_signal': self.mind_signal,
+            'role_pattern': self.role_pattern,
+            'tempo_pattern': self.tempo_pattern,
+            'identity_openness': self.identity_openness,
+            'trajectory_code': self.trajectory_code,
+            'confidence': self.confidence or {},
+            'computed_at': self.computed_at.isoformat() if self.computed_at else None
+        }
 
 # ============================================================================
 # MAGIC 10 COMPATIBILITY ENGINE
@@ -1646,6 +1720,92 @@ def update_user_priorities():
         db.session.rollback()
         print(f"Update priorities error: {e}")
         return jsonify({'error': 'Failed to update priorities'}), 500
+
+# ============================================================================
+# API ROUTES - RESONANCE TEN
+# ============================================================================
+
+@app.route('/config/resonance', methods=['GET'])
+def get_resonance_config():
+    """Get Resonance Ten configuration"""
+    try:
+        config = get_resonance_config()
+        return jsonify(config)
+    except Exception as e:
+        print(f"Get resonance config error: {e}")
+        return jsonify({'error': 'Failed to get configuration'}), 500
+
+@app.route('/me/resonance', methods=['GET'])
+@require_auth
+def get_user_resonance_prefs():
+    """Get user's Resonance Ten preferences"""
+    try:
+        prefs = UserResonancePrefs.query.get(request.current_user_id)
+        if not prefs:
+            # Create default preferences if they don't exist
+            config = get_resonance_config()
+            default_weights = {key: 50 for key in config['keys']}  # Default to 50 for all dimensions
+            
+            prefs = UserResonancePrefs(
+                user_id=request.current_user_id,
+                version=1,
+                weights=default_weights,
+                facets={}
+            )
+            db.session.add(prefs)
+            db.session.commit()
+        
+        return jsonify(prefs.to_dict())
+    
+    except Exception as e:
+        print(f"Get resonance prefs error: {e}")
+        return jsonify({'error': 'Failed to get preferences'}), 500
+
+@app.route('/me/resonance', methods=['PUT'])
+@require_auth
+def update_user_resonance_prefs():
+    """Update user's Resonance Ten preferences"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Validate version
+        version = data.get('version', 1)
+        if version != 1:
+            return jsonify({'error': 'Unsupported version'}), 400
+        
+        # Validate weights
+        weights = data.get('weights', {})
+        is_valid, error_msg = validate_resonance_weights(weights)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+        
+        # Validate facets (optional)
+        facets = data.get('facets', {})
+        if facets and not isinstance(facets, dict):
+            return jsonify({'error': 'Facets must be a dictionary'}), 400
+        
+        # Get or create preferences record
+        prefs = UserResonancePrefs.query.get(request.current_user_id)
+        if not prefs:
+            prefs = UserResonancePrefs(user_id=request.current_user_id)
+            db.session.add(prefs)
+        
+        # Update preferences
+        prefs.version = version
+        prefs.weights = weights
+        prefs.facets = facets
+        prefs.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({'ok': True})
+    
+    except Exception as e:
+        db.session.rollback()
+        print(f"Update resonance prefs error: {e}")
+        return jsonify({'error': 'Failed to update preferences'}), 500
 
 @app.route('/api/compatibility/calculate', methods=['POST'])
 @require_auth
