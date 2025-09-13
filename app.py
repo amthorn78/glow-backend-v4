@@ -47,6 +47,10 @@ except Exception as e:
     ResonanceScorer = None
     score_compatibility = None
 
+# Import Redis session store for T3.1-R2
+from redis_session_store import get_session_store
+from session_diagnostics import create_session_diagnostics_endpoint
+
 # ============================================================================
 # APPLICATION SETUP
 # ============================================================================
@@ -177,6 +181,10 @@ limiter = Limiter(
 
 # Initialize Argon2 password hasher
 ph = PasswordHasher()
+
+# Initialize Redis session store (T3.1-R2)
+session_store = get_session_store()
+app.logger.info(f"Session store initialized: {type(session_store).__name__}")
 
 # Configure CORS with secure, production-ready setup
 import re
@@ -1722,65 +1730,66 @@ def register():
 # ============================================================================
 
 def create_auth_session(user_id):
-    """Create a new authenticated session"""
+    """Create a new authenticated session using Redis/filesystem backend"""
     try:
-        session.permanent = True
-        session['user_id'] = user_id
-        session['created_at'] = datetime.utcnow().isoformat()
-        session['last_seen_at'] = datetime.utcnow().isoformat()
+        # Create session using the session store
+        session_data = session_store.create_session(user_id)
         
-        app.logger.info(f"Session created for user {user_id}")
+        # Set Flask session with session ID for cookie management
+        session.permanent = True
+        session['session_id'] = session_data['session_id']
+        session['user_id'] = user_id
+        session['created_at'] = session_data['created_at']
+        session['last_seen_at'] = session_data['last_seen']
+        
+        app.logger.info(f"Session created for user {user_id}: {session_data['session_id']}")
         return True
     except Exception as e:
         app.logger.error(f"Failed to create session: {e}")
         return False
 
 def validate_auth_session():
-    """Validate current session and check timeouts"""
+    """Validate current session using Redis/filesystem backend with smart renewal"""
     try:
-        user_id = session.get('user_id')
-        if not user_id:
+        session_id = session.get('session_id')
+        if not session_id:
             return None, "AUTH_REQUIRED"
         
-        # Check if session exists and get timestamps
-        created_at_str = session.get('created_at')
-        last_seen_str = session.get('last_seen_at')
-        
-        if not created_at_str or not last_seen_str:
+        # Get session from store
+        session_data = session_store.get_session(session_id)
+        if not session_data:
             session.clear()
             return None, "SESSION_EXPIRED"
         
-        created_at = datetime.fromisoformat(created_at_str)
-        last_seen = datetime.fromisoformat(last_seen_str)
-        now = datetime.utcnow()
+        # Touch session (updates last_seen and checks renewal)
+        touch_result = session_store.touch_session(session_id)
         
-        # Check absolute timeout (24 hours)
-        if now - created_at > app.config['AUTH_ABSOLUTE_TIMEOUT']:
-            session.clear()
-            app.logger.info(f"Session expired (absolute timeout) for user {user_id}")
-            return None, "SESSION_EXPIRED"
+        # Update Flask session if renewed
+        if touch_result['renewed']:
+            session['last_seen_at'] = datetime.utcnow().isoformat()
+            app.logger.info(f"Session renewed for user {session_data['user_id']}: {session_id}")
         
-        # Check idle timeout (30 minutes)
-        if now - last_seen > app.config['PERMANENT_SESSION_LIFETIME']:
-            session.clear()
-            app.logger.info(f"Session expired (idle timeout) for user {user_id}")
-            return None, "SESSION_EXPIRED"
+        return session_data['user_id'], None
         
-        # Update last seen time (sliding window)
-        session['last_seen_at'] = now.isoformat()
-        
-        return user_id, None
     except Exception as e:
         app.logger.error(f"Session validation error: {e}")
         session.clear()
         return None, "SESSION_EXPIRED"
 
 def clear_auth_session():
-    """Clear the current session"""
+    """Clear the current session using Redis/filesystem backend"""
     try:
+        session_id = session.get('session_id')
         user_id = session.get('user_id')
+        
+        # Destroy session in store
+        if session_id:
+            session_store.destroy_session(session_id)
+        
+        # Clear Flask session
         session.clear()
-        app.logger.info(f"Session cleared for user {user_id}")
+        
+        app.logger.info(f"Session cleared for user {user_id}: {session_id}")
         return True
     except Exception as e:
         app.logger.error(f"Failed to clear session: {e}")
@@ -3513,6 +3522,13 @@ def initialize_admin():
         db.session.rollback()
         print(f"Admin initialization error: {e}")
         return jsonify({'error': 'Failed to initialize admin user'}), 500
+
+
+# ============================================================================
+# SESSION DIAGNOSTICS ENDPOINTS (T3.1-R2)
+# ============================================================================
+# Create session diagnostics endpoints after all models and functions are defined
+create_session_diagnostics_endpoint(app, session_store, validate_auth_session)
 
 
 if __name__ == '__main__':
