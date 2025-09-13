@@ -1930,33 +1930,53 @@ def auth_v2_me():
             return response, 401
         
         # Single optimized query with LEFT JOINs for all user data
-        query = db.session.query(
-            User.id,
-            User.email,
-            User.status,
-            User.is_admin,
-            User.updated_at,
-            User.profile_version,
-            UserProfile.display_name,
-            UserProfile.avatar_url,
-            UserProfile.bio,
-            UserProfile.age,
-            UserProfile.profile_completion,
-            BirthData.birth_date,
-            BirthData.birth_time,
-            BirthData.timezone,
-            BirthData.latitude,
-            BirthData.longitude,
-            BirthData.birth_location,
-            BirthData.birth_instant_utc,
-            BirthData.tz_offset_minutes
-        ).outerjoin(
-            UserProfile, User.id == UserProfile.user_id
-        ).outerjoin(
-            BirthData, User.id == BirthData.user_id
-        ).filter(User.id == user_id)
-        
-        result = query.first()
+        try:
+            query = db.session.query(
+                User.id,
+                User.email,
+                User.status,
+                User.is_admin,
+                User.updated_at,
+                User.profile_version,
+                UserProfile.display_name,
+                UserProfile.avatar_url,
+                UserProfile.bio,
+                UserProfile.age,
+                UserProfile.profile_completion,
+                BirthData.birth_date,
+                BirthData.birth_time,
+                BirthData.timezone,
+                BirthData.latitude,
+                BirthData.longitude,
+                BirthData.birth_location,
+                BirthData.birth_instant_utc,
+                BirthData.tz_offset_minutes
+            ).outerjoin(
+                UserProfile, User.id == UserProfile.user_id
+            ).outerjoin(
+                BirthData, User.id == BirthData.user_id
+            ).filter(User.id == user_id)
+            
+            result = query.first()
+        except Exception as query_error:
+            app.logger.error(f"Database query error in /me: {query_error}")
+            # Fallback to basic user query
+            user = User.query.get(user_id)
+            if not user:
+                session.clear()
+                response = jsonify({
+                    'ok': False,
+                    'error': 'User not found',
+                    'code': 'USER_NOT_FOUND'
+                })
+                for header, value in response_headers.items():
+                    response.headers[header] = value
+                return response, 401
+            
+            # Return basic response without enhanced fields
+            result = (user.id, user.email, user.status, user.is_admin, user.updated_at, 1,
+                     None, None, None, None, None,  # UserProfile fields
+                     None, None, None, None, None, None, None, None)  # BirthData fields
         
         if not result:
             session.clear()
@@ -1970,21 +1990,44 @@ def auth_v2_me():
                 response.headers[header] = value
             return response, 401
         
-        # Unpack query result
-        (user_id, email, status, is_admin, updated_at, profile_version,
-         display_name, avatar_url, bio, age, profile_completion,
-         birth_date, birth_time, timezone, latitude, longitude, birth_location,
-         birth_instant_utc, tz_offset_minutes) = result
+        # Safely unpack query result
+        try:
+            (user_id, email, status, is_admin, updated_at, profile_version,
+             display_name, avatar_url, bio, age, profile_completion,
+             birth_date, birth_time, timezone, latitude, longitude, birth_location,
+             birth_instant_utc, tz_offset_minutes) = result
+        except (ValueError, TypeError) as unpack_error:
+            app.logger.error(f"Result unpacking error in /me: {unpack_error}")
+            # Use safe defaults
+            user_id, email, status, is_admin, updated_at = result[:5]
+            profile_version = getattr(result, 'profile_version', 1) if hasattr(result, 'profile_version') else 1
+            display_name = avatar_url = bio = age = profile_completion = None
+            birth_date = birth_time = timezone = latitude = longitude = birth_location = None
+            birth_instant_utc = tz_offset_minutes = None
         
         # Session management and renewal logic
         now = datetime.utcnow()
         session_renewed = False
         
-        # Get session metadata
-        session_id = session.get('session_id', 'unknown')
-        last_seen = session.get('last_seen', now)
-        if isinstance(last_seen, str):
-            last_seen = datetime.fromisoformat(last_seen.replace('Z', ''))
+        # Get session metadata safely
+        session_id = session.get('session_id', f'sess_{user_id}_{int(now.timestamp())}')
+        
+        # Use existing session key names
+        created_at_str = session.get('created_at', now.isoformat())
+        last_seen_str = session.get('last_seen_at', now.isoformat())
+        
+        try:
+            if isinstance(created_at_str, str):
+                created_at = datetime.fromisoformat(created_at_str)
+            else:
+                created_at = created_at_str
+                
+            if isinstance(last_seen_str, str):
+                last_seen = datetime.fromisoformat(last_seen_str)
+            else:
+                last_seen = last_seen_str
+        except (ValueError, TypeError):
+            created_at = last_seen = now
         
         # Calculate session expiry times
         idle_timeout_minutes = 30
@@ -1992,16 +2035,13 @@ def auth_v2_me():
         renewal_threshold_minutes = 10
         
         idle_expires_at = last_seen + timedelta(minutes=idle_timeout_minutes)
-        absolute_expires_at = session.get('created_at', now)
-        if isinstance(absolute_expires_at, str):
-            absolute_expires_at = datetime.fromisoformat(absolute_expires_at.replace('Z', ''))
-        absolute_expires_at = absolute_expires_at + timedelta(hours=absolute_timeout_hours)
+        absolute_expires_at = created_at + timedelta(hours=absolute_timeout_hours)
         
         # Check if session renewal is needed (within 10 minutes of idle expiry)
         time_until_idle_expiry = idle_expires_at - now
         if time_until_idle_expiry.total_seconds() <= (renewal_threshold_minutes * 60):
             # Renew session
-            session['last_seen'] = now.isoformat() + 'Z'
+            session['last_seen_at'] = now.isoformat()
             session_renewed = True
             app.logger.info(f"Session renewed for user {user_id}")
         
@@ -2029,7 +2069,7 @@ def auth_v2_me():
                 'birth_instant_utc': birth_instant_utc.isoformat() + 'Z' if birth_instant_utc else None,
                 'tz_offset_minutes': tz_offset_minutes
             },
-            'profile_version': profile_version,
+            'profile_version': profile_version or 1,
             'session_meta': {
                 'session_id': session_id,
                 'last_seen': last_seen.isoformat() + 'Z',
