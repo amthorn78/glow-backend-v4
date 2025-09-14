@@ -137,7 +137,7 @@ def create_revocation_endpoints(app, session_store, validate_auth_session, csrf_
     
     @app.route('/api/auth/logout-all', methods=['POST'])
     @csrf_protect(session_store, validate_auth_session)
-    def logout_all():
+    def auth_logout_all_revocation():
         """Logout all sessions for current user"""
         logger = app.logger
         
@@ -216,7 +216,7 @@ def create_revocation_endpoints(app, session_store, validate_auth_session, csrf_
     
     @app.route('/api/auth/password', methods=['POST'])
     @csrf_protect(session_store, validate_auth_session)
-    def change_password():
+    def auth_change_password_revocation():
         """Change password and revoke other sessions"""
         logger = app.logger
         
