@@ -1908,27 +1908,37 @@ def auth_v2_login():
         
         # Success response (Auth v2 contract)
         response_data = {
-            'ok': True,
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'status': user.status,
-                'is_admin': user.is_admin
-            },
-            'issued_at': datetime.utcnow().isoformat() + 'Z'
+            'ok': True
         }
         
-        # Create response and add CSRF token (T3.2)
+        # Create response with proper headers
         response = make_response(jsonify(response_data))
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Vary'] = 'Origin'
         
-        # Add CSRF token to session and cookie
+        # Issue both session and CSRF cookies using centralized helpers (BE-LOGIN-02)
         session_id = session.get('session_id')
         if session_id:
+            # Import centralized cookie helpers
+            from cookies import set_session_cookie, set_csrf_cookie
+            from csrf_protection import generate_csrf_token
+            
+            # Set session cookie (HttpOnly=true)
+            set_session_cookie(response, session_id, max_age=1800)
+            
+            # Generate and set CSRF cookie (HttpOnly=false for JavaScript access)
+            csrf_token = generate_csrf_token()
+            set_csrf_cookie(response, csrf_token, max_age=1800)
+            
+            # Store CSRF token in session for validation
             session_data = session_store.get_session(session_id)
             if session_data:
-                session_data = add_csrf_to_login(session_data, response, app.logger)
-                # Update session with CSRF token
+                session_data['csrf'] = csrf_token
                 session_store.update_session(session_id, session_data)
+            
+            # Login diagnostics logging (BE-LOGIN-02-C)
+            app.logger.info(f"auth_login_issue user_id={user.id} has_session_cookie=true has_csrf_cookie=true domain=.glowme.io status=200")
         
         app.logger.info(f"Login successful for user {user.id}")
         return response, 200
