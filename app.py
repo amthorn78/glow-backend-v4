@@ -50,27 +50,16 @@ except Exception as e:
 # Import Redis session store for T3.1-R2
 
 # ============================================================================
-# COOKIE CONFIGURATION (BE-COOKIE-01)
+# COOKIE CONFIGURATION (BE-CKHLP-01)
 # ============================================================================
-SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", ".glowme.io")
-SESSION_SAMESITE = os.getenv("SESSION_SAMESITE", "Lax")
-SESSION_SECURE = os.getenv("SESSION_SECURE", "true").lower() == "true"
-
-def _cookie_opts():
-    return dict(
-        domain=SESSION_COOKIE_DOMAIN,
-        path="/",
-        httponly=True,
-        secure=SESSION_SECURE,
-        samesite=SESSION_SAMESITE,
-    )
-
-def _set_cookie(resp, name, value, max_age=None):
-    resp.set_cookie(name, value, max_age=max_age, **_cookie_opts())
-
-def _clear_cookie(resp, name):
-    # expire now, on the same domain/path/attrs
-    resp.set_cookie(name, "", max_age=0, expires=0, **_cookie_opts())
+# Import centralized cookie helpers to resolve circular imports
+from cookies import (
+    get_cookie_options, set_cookie, clear_cookie,
+    set_session_cookie, set_csrf_cookie, 
+    clear_session_cookie, clear_csrf_cookie, clear_all_auth_cookies,
+    # Legacy compatibility functions
+    _cookie_opts, _set_cookie, _clear_cookie
+)
 from redis_session_store import get_session_store
 from session_diagnostics import create_session_diagnostics_endpoint
 

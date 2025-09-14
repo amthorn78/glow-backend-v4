@@ -183,26 +183,8 @@ def create_revocation_endpoints(app, session_store, validate_auth_session, csrf_
             response.headers['Cache-Control'] = 'no-store'
             
             # Clear current session cookie (KILL_ALL mode)
-            response.set_cookie(
-                'glow_session',
-                '',
-                max_age=0,
-                secure=True,
-                httponly=True,
-                samesite='Lax',
-                path='/'
-            )
-            
-            # Clear CSRF cookie
-            response.set_cookie(
-                'glow_csrf',
-                '',
-                max_age=0,
-                secure=True,
-                httponly=False,
-                samesite='Lax',
-                path='/'
-            )
+            from cookies import clear_all_auth_cookies
+            clear_all_auth_cookies(response)
             
             return response, 200
             
@@ -284,16 +266,9 @@ def create_revocation_endpoints(app, session_store, validate_auth_session, csrf_
                 # Update Flask session
                 session['session_id'] = new_session_id
                 
-                # Set new session cookie
-                response.set_cookie(
-                    'glow_session',
-                    new_session_id,
-                    max_age=1800,  # 30 minutes
-                    secure=True,
-                    httponly=True,
-                    samesite='Lax',
-                    path='/'
-                )
+                # Set new session cookie using centralized helper
+                from cookies import set_session_cookie
+                set_session_cookie(response, new_session_id)
             
             return response, 200
             
