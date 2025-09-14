@@ -2728,13 +2728,265 @@ def get_profile_birth_data():
     try:
         birth_data = BirthData.query.get(request.current_user_id)
         if not birth_data:
-            return jsonify({'birth_data': None})
+            return jsonify({'ok': True, 'birth_data': None})
         
-        return jsonify(birth_data.to_dict())
+        return jsonify({
+            'ok': True,
+            'birth_data': {
+                'date': birth_data.birth_date.isoformat() if birth_data.birth_date else None,
+                'time': birth_data.birth_time.strftime('%H:%M:%S') if birth_data.birth_time else None,
+                'timezone': birth_data.timezone,
+                'location': birth_data.birth_location,
+                'latitude': float(birth_data.latitude) if birth_data.latitude else None,
+                'longitude': float(birth_data.longitude) if birth_data.longitude else None,
+            }
+        })
     
     except Exception as e:
         print(f"Get profile birth data error: {e}")
-        return jsonify({'error': 'Failed to get birth data'}), 500
+        return jsonify({'ok': False, 'error': 'Failed to get birth data'}), 500
+
+@app.route('/api/profile/birth-data', methods=['PUT'], strict_slashes=False)
+@csrf_protect(session_store, validate_auth_session)
+@require_auth
+def put_profile_birth_data():
+    """Update user's birth data for profile management"""
+    try:
+        # Ensure JSON request
+        if not request.is_json:
+            return jsonify({'ok': False, 'code': 'VALIDATION', 'error': 'JSON required'}), 400
+        
+        payload = request.get_json() or {}
+        
+        # Extract and validate required fields
+        date_str = payload.get('date')
+        time_str = payload.get('time')
+        timezone_str = payload.get('timezone')
+        location_str = (payload.get('location') or '').strip() or None
+        latitude = payload.get('latitude')
+        longitude = payload.get('longitude')
+        
+        if not (date_str and time_str and timezone_str and location_str):
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'date, time, timezone, location required'
+            }), 400
+        
+        # Validate date format (YYYY-MM-DD)
+        try:
+            birth_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'Invalid date format, use YYYY-MM-DD'
+            }), 400
+        
+        # Normalize and validate time format (HH:MM or HH:MM:SS -> HH:MM:SS)
+        try:
+            time_parts = time_str.split(':')
+            if len(time_parts) == 2:
+                time_normalized = f"{time_parts[0].zfill(2)}:{time_parts[1].zfill(2)}:00"
+            elif len(time_parts) == 3:
+                time_normalized = f"{time_parts[0].zfill(2)}:{time_parts[1].zfill(2)}:{time_parts[2].zfill(2)}"
+            else:
+                raise ValueError('Invalid time format')
+            
+            birth_time = datetime.strptime(time_normalized, '%H:%M:%S').time()
+        except ValueError:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'Invalid time format, use HH:MM or HH:MM:SS'
+            }), 400
+        
+        # Validate timezone (basic check)
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(timezone_str)
+        except Exception:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'Invalid timezone'
+            }), 400
+        
+        # Upsert birth data
+        birth_data = BirthData.query.get(request.current_user_id)
+        if not birth_data:
+            birth_data = BirthData(user_id=request.current_user_id)
+            db.session.add(birth_data)
+        
+        # Update fields
+        birth_data.birth_date = birth_date
+        birth_data.birth_time = birth_time
+        birth_data.timezone = timezone_str
+        birth_data.birth_location = location_str
+        birth_data.latitude = latitude
+        birth_data.longitude = longitude
+        
+        # Update user's updated_at timestamp
+        user = User.query.get(request.current_user_id)
+        if user:
+            user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Return success response
+        response_data = {
+            'ok': True,
+            'birth_data': {
+                'date': birth_date.isoformat(),
+                'time': birth_time.strftime('%H:%M:%S'),
+                'timezone': timezone_str,
+                'location': location_str,
+                'latitude': float(latitude) if latitude else None,
+                'longitude': float(longitude) if longitude else None,
+            },
+            'updated_at': datetime.utcnow().isoformat() + 'Z'
+        }
+        
+        response = make_response(jsonify(response_data), 200)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        
+        return response
+        
+    except Exception as e:
+        print(f"Put profile birth data error: {e}")
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': 'Failed to update birth data'}), 500
+
+@app.route('/api/profile/basic', methods=['GET'], strict_slashes=False)
+@require_auth
+def get_profile_basic():
+    """Get user's basic profile information"""
+    try:
+        profile = UserProfile.query.filter_by(user_id=request.current_user_id).first()
+        if not profile:
+            return jsonify({'ok': True, 'profile': None})
+        
+        return jsonify({
+            'ok': True,
+            'profile': {
+                'first_name': profile.first_name,
+                'last_name': profile.last_name,
+                'display_name': f"{profile.first_name} {profile.last_name}".strip() if profile.first_name or profile.last_name else None,
+                'avatar_url': None,  # Not implemented yet
+                'bio': profile.bio,
+                'age': profile.age,
+            }
+        })
+    
+    except Exception as e:
+        print(f"Get profile basic error: {e}")
+        return jsonify({'ok': False, 'error': 'Failed to get basic profile'}), 500
+
+@app.route('/api/profile/basic', methods=['PUT'], strict_slashes=False)
+@csrf_protect(session_store, validate_auth_session)
+@require_auth
+def put_profile_basic():
+    """Update user's basic profile information"""
+    try:
+        # Ensure JSON request
+        if not request.is_json:
+            return jsonify({'ok': False, 'code': 'VALIDATION', 'error': 'JSON required'}), 400
+        
+        payload = request.get_json() or {}
+        
+        # Extract fields (all optional)
+        first_name = (payload.get('first_name') or '').strip() or None
+        last_name = (payload.get('last_name') or '').strip() or None
+        bio = (payload.get('bio') or '').strip() or None
+        age = payload.get('age')
+        
+        # Validate age if provided
+        if age is not None:
+            try:
+                age = int(age)
+                if age < 18 or age > 120:
+                    return jsonify({
+                        'ok': False, 
+                        'code': 'VALIDATION', 
+                        'error': 'Age must be between 18 and 120'
+                    }), 400
+            except (ValueError, TypeError):
+                return jsonify({
+                    'ok': False, 
+                    'code': 'VALIDATION', 
+                    'error': 'Age must be a valid number'
+                }), 400
+        
+        # Validate field lengths
+        if first_name and len(first_name) > 50:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'First name too long (max 50 characters)'
+            }), 400
+        
+        if last_name and len(last_name) > 50:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'Last name too long (max 50 characters)'
+            }), 400
+        
+        if bio and len(bio) > 1000:
+            return jsonify({
+                'ok': False, 
+                'code': 'VALIDATION', 
+                'error': 'Bio too long (max 1000 characters)'
+            }), 400
+        
+        # Upsert profile
+        profile = UserProfile.query.filter_by(user_id=request.current_user_id).first()
+        if not profile:
+            profile = UserProfile(user_id=request.current_user_id)
+            db.session.add(profile)
+        
+        # Update fields
+        profile.first_name = first_name
+        profile.last_name = last_name
+        profile.bio = bio
+        profile.age = age
+        profile.updated_at = datetime.utcnow()
+        
+        # Update user's updated_at timestamp
+        user = User.query.get(request.current_user_id)
+        if user:
+            user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Return success response
+        display_name = f"{first_name} {last_name}".strip() if first_name or last_name else None
+        response_data = {
+            'ok': True,
+            'profile': {
+                'first_name': first_name,
+                'last_name': last_name,
+                'display_name': display_name,
+                'avatar_url': None,  # Not implemented yet
+                'bio': bio,
+                'age': age,
+            },
+            'updated_at': datetime.utcnow().isoformat() + 'Z'
+        }
+        
+        response = make_response(jsonify(response_data), 200)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        
+        return response
+        
+    except Exception as e:
+        print(f"Put profile basic error: {e}")
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': 'Failed to update basic profile'}), 500
 
 @app.route('/api/profile/human-design', methods=['GET'])
 @require_auth
