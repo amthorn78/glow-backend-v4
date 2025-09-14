@@ -19,14 +19,18 @@ def get_csrf_enforcement():
 
 def set_csrf_cookie(response, csrf_token):
     """Set the glow_csrf cookie with proper attributes"""
+    # Import centralized cookie options from app.py
+    from app import _cookie_opts
+    
+    # Get base cookie options and override httponly for CSRF
+    cookie_opts = _cookie_opts()
+    cookie_opts['httponly'] = False  # Must be readable by JavaScript
+    
     response.set_cookie(
         'glow_csrf',
         csrf_token,
-        max_age=7200,  # 2 hours
-        secure=True,
-        httponly=False,  # Must be readable by JavaScript
-        samesite='Lax',
-        path='/'
+        max_age=1800,  # 30 minutes (same as session)
+        **cookie_opts
     )
     return response
 
@@ -203,15 +207,10 @@ def add_csrf_to_login(session_data, response, logger):
 
 def clear_csrf_on_logout(response):
     """Clear CSRF cookie on logout"""
-    response.set_cookie(
-        'glow_csrf',
-        '',
-        max_age=0,
-        secure=True,
-        httponly=False,
-        samesite='Lax',
-        path='/'
-    )
+    # Import centralized cookie clearing from app.py
+    from app import _clear_cookie
+    
+    _clear_cookie(response, 'glow_csrf')
     return response
 
 # Test function for CSRF validation

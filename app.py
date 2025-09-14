@@ -48,6 +48,29 @@ except Exception as e:
     score_compatibility = None
 
 # Import Redis session store for T3.1-R2
+
+# ============================================================================
+# COOKIE CONFIGURATION (BE-COOKIE-01)
+# ============================================================================
+SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", ".glowme.io")
+SESSION_SAMESITE = os.getenv("SESSION_SAMESITE", "Lax")
+SESSION_SECURE = os.getenv("SESSION_SECURE", "true").lower() == "true"
+
+def _cookie_opts():
+    return dict(
+        domain=SESSION_COOKIE_DOMAIN,
+        path="/",
+        httponly=True,
+        secure=SESSION_SECURE,
+        samesite=SESSION_SAMESITE,
+    )
+
+def _set_cookie(resp, name, value, max_age=None):
+    resp.set_cookie(name, value, max_age=max_age, **_cookie_opts())
+
+def _clear_cookie(resp, name):
+    # expire now, on the same domain/path/attrs
+    resp.set_cookie(name, "", max_age=0, expires=0, **_cookie_opts())
 from redis_session_store import get_session_store
 from session_diagnostics import create_session_diagnostics_endpoint
 
@@ -1794,7 +1817,7 @@ def clear_auth_session():
         # Clear Flask session
         session.clear()
         
-        app.logger.info(f"Session cleared for user {user_id}: {session_id}")
+        app.logger.info(f"Session cleared for user {user_id or 'unknown'}")
         return True
     except Exception as e:
         app.logger.error(f"Failed to clear session: {e}")
@@ -2114,7 +2137,7 @@ def auth_v2_me():
         
         # Add Set-Cookie header if session was renewed
         if session_renewed:
-            response.headers['Set-Cookie'] = f'glow_session={session.get("session_id", "")}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=1800'
+            _set_cookie(response, 'glow_session', session.get("session_id", ""), max_age=1800)
         
         # Log performance and success
         latency_ms = int((time_module.time() - start_time) * 1000)
@@ -2144,11 +2167,12 @@ def auth_v2_logout():
         # Clear session regardless of validity
         clear_auth_session()
         
-        # Create response and clear CSRF cookie (T3.2)
+        # Create response and clear cookies
         response_data = {'ok': True}
         response = make_response(jsonify(response_data))
         
-        # Clear CSRF cookie on logout
+        # Clear both session and CSRF cookies
+        _clear_cookie(response, 'glow_session')
         clear_csrf_on_logout(response)
         
         app.logger.info(f"Logout successful for user {user_id or 'unknown'}")
