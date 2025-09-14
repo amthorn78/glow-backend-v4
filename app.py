@@ -53,8 +53,11 @@ from session_diagnostics import create_session_diagnostics_endpoint
 
 # Import CSRF protection for T3.2
 from csrf_protection import (
-    create_csrf_endpoints, add_csrf_to_login, clear_csrf_on_logout, 
+    add_csrf_to_login, clear_csrf_on_logout, create_csrf_endpoints,
     csrf_protect, get_csrf_enforcement
+)
+from session_revocation import (
+    create_revocation_endpoints, track_session_on_login, untrack_session_on_logout
 )
 
 # ============================================================================
@@ -1737,6 +1740,9 @@ def create_auth_session(user_id):
         session['created_at'] = session_data['created_at']
         session['last_seen_at'] = session_data['last_seen']
         
+        # Track session for revocation (T-BE-003)
+        track_session_on_login(session_store, user_id, session_data['session_id'])
+        
         app.logger.info(f"Session created for user {user_id}: {session_data['session_id']}")
         return True
     except Exception as e:
@@ -1776,6 +1782,10 @@ def clear_auth_session():
     try:
         session_id = session.get('session_id')
         user_id = session.get('user_id')
+        
+        # Untrack session for revocation (T-BE-003)
+        if user_id and session_id:
+            untrack_session_on_logout(session_store, user_id, session_id)
         
         # Destroy session in store
         if session_id:
@@ -3526,6 +3536,12 @@ create_session_diagnostics_endpoint(app, session_store, validate_auth_session)
 # ============================================================================
 # Create CSRF endpoints after all models and functions are defined
 create_csrf_endpoints(app, session_store, validate_auth_session)
+
+# ============================================================================
+# SESSION REVOCATION ENDPOINTS (T-BE-003)
+# ============================================================================
+# Create session revocation endpoints after all models and functions are defined
+create_revocation_endpoints(app, session_store, validate_auth_session, csrf_protect)
 
 
 if __name__ == '__main__':
