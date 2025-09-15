@@ -2283,10 +2283,10 @@ def internal_error(error):
 def get_user_priorities():
     """Get user's Magic 10 priorities"""
     try:
-        priorities = UserPriorities.query.get(g.user.id)
+        priorities = UserPriorities.query.get(g.user)
         if not priorities:
             # Create default priorities if they don't exist
-            priorities = UserPriorities(user_id=g.user.id)
+            priorities = UserPriorities(user_id=g.user)
             db.session.add(priorities)
             db.session.commit()
         
@@ -2319,9 +2319,9 @@ def update_user_priorities():
                     return jsonify({'error': f'{field} must be an integer between 1 and 10'}), 400
         
         # Get or create priorities record
-        priorities = UserPriorities.query.get(g.user.id)
+        priorities = UserPriorities.query.get(g.user)
         if not priorities:
-            priorities = UserPriorities(user_id=g.user.id)
+            priorities = UserPriorities(user_id=g.user)
             db.session.add(priorities)
         
         # Update priorities
@@ -2360,14 +2360,14 @@ def get_resonance_config_endpoint():
 def get_user_resonance_prefs():
     """Get user's Resonance Ten preferences"""
     try:
-        prefs = UserResonancePrefs.query.get(g.user.id)
+        prefs = UserResonancePrefs.query.get(g.user)
         if not prefs:
             # Create default preferences if they don't exist
             config = get_resonance_config()
             default_weights = {key: 50 for key in config['keys']}  # Default to 50 for all dimensions
             
             prefs = UserResonancePrefs(
-                user_id=g.user.id,
+                user_id=g.user,
                 version=1,
                 weights=default_weights,
                 facets={}
@@ -2407,9 +2407,9 @@ def update_user_resonance_prefs():
             return jsonify({'error': 'Facets must be a dictionary'}), 400
         
         # Get or create preferences record
-        prefs = UserResonancePrefs.query.get(g.user.id)
+        prefs = UserResonancePrefs.query.get(g.user)
         if not prefs:
-            prefs = UserResonancePrefs(user_id=g.user.id)
+            prefs = UserResonancePrefs(user_id=g.user)
             db.session.add(prefs)
         
         # Update preferences
@@ -2461,12 +2461,12 @@ def calculate_compatibility():
             return jsonify({'error': 'Target user not found'}), 404
         
         # Calculate compatibility
-        compatibility = calculate_mutual_compatibility(g.user.id, target_user_id)
+        compatibility = calculate_mutual_compatibility(g.user, target_user_id)
         if not compatibility:
             return jsonify({'error': 'Failed to calculate compatibility'}), 500
         
         # Store result
-        store_compatibility_result(g.user.id, target_user_id, compatibility)
+        store_compatibility_result(g.user, target_user_id, compatibility)
         
         return jsonify({
             'compatibility': compatibility,
@@ -2485,7 +2485,7 @@ def get_matches():
         limit = request.args.get('limit', 20, type=int)
         min_score = request.args.get('min_score', 60, type=int)
         
-        matches = get_user_matches(g.user.id, limit, min_score)
+        matches = get_user_matches(g.user, limit, min_score)
         
         # Get user details for matches
         enriched_matches = []
@@ -2514,7 +2514,7 @@ def get_matches():
 def get_birth_data():
     """Get user's birth data"""
     try:
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
             return jsonify({'birth_data': None})
         
@@ -2543,9 +2543,9 @@ def save_birth_data():
         coordinates = geocode_location(data['birth_location'])
         
         # Get or create birth data record
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
-            birth_data = BirthData(user_id=g.user.id)
+            birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         
         # Update birth data
@@ -2578,7 +2578,7 @@ def calculate_human_design():
     """Calculate Human Design chart with enhanced intelligence"""
     try:
         # Get user's birth data
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
             return jsonify({'error': 'Birth data not found'}), 404
         
@@ -2597,13 +2597,13 @@ def calculate_human_design():
         # Calculate HD chart using intelligence engine
         try:
             from hd_intelligence_engine import get_or_calculate_hd_chart
-            chart_data = get_or_calculate_hd_chart(g.user.id, birth_data_dict)
+            chart_data = get_or_calculate_hd_chart(g.user, birth_data_dict)
             
             if not chart_data:
                 return jsonify({'error': 'Failed to calculate HD chart'}), 500
             
             # Get the stored HD data
-            hd_data = HumanDesignData.query.get(g.user.id)
+            hd_data = HumanDesignData.query.get(g.user)
             
             return jsonify({
                 'message': 'Human Design chart calculated successfully',
@@ -2645,9 +2645,9 @@ def generate_bodygraph():
             return jsonify({'error': api_response['error']}), 500
         
         # Store or update Human Design data for the user
-        hd_data = HumanDesignData.query.get(g.user.id)
+        hd_data = HumanDesignData.query.get(g.user)
         if not hd_data:
-            hd_data = HumanDesignData(user_id=g.user.id)
+            hd_data = HumanDesignData(user_id=g.user)
             db.session.add(hd_data)
         
         # Extract and store key information from API response
@@ -2679,7 +2679,7 @@ def generate_bodygraph():
 def get_human_design():
     """Get user's Human Design data"""
     try:
-        hd_data = HumanDesignData.query.get(g.user.id)
+        hd_data = HumanDesignData.query.get(g.user)
         if not hd_data:
             return jsonify({'human_design': None})
         
@@ -2698,7 +2698,7 @@ def get_human_design():
 def get_profile():
     """Get user profile with separated auth and profile data"""
     try:
-        user = User.query.get(g.user.id)
+        user = User.query.get(g.user)
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
@@ -2738,7 +2738,7 @@ def update_profile():
     """Update user profile with separated auth and profile data"""
     try:
         data = request.get_json()
-        user = User.query.get(g.user.id)
+        user = User.query.get(g.user)
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
@@ -2799,7 +2799,7 @@ def update_profile():
 def get_profile_birth_data():
     """Get user's birth data for profile management"""
     try:
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
             response = jsonify({'ok': True, 'birth_data': None})
         else:
@@ -2834,7 +2834,7 @@ def put_profile_birth_data():
     """Update user's birth data for profile management"""
     try:
         # BE-DECOR-ORDER-06: Diagnostic logging
-        print(f"save.birth.put.start user_id={g.user.id} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
+        print(f"save.birth.put.start user_id={g.user} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
         
         # Ensure JSON request
         if not request.is_json:
@@ -2897,9 +2897,9 @@ def put_profile_birth_data():
             }), 400
         
         # Upsert birth data
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
-            birth_data = BirthData(user_id=g.user.id)
+            birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         
         # Update fields
@@ -2911,7 +2911,7 @@ def put_profile_birth_data():
         birth_data.longitude = longitude
         
         # Update user's updated_at timestamp
-        user = User.query.get(g.user.id)
+        user = User.query.get(g.user)
         if user:
             user.updated_at = datetime.utcnow()
         
@@ -2948,7 +2948,7 @@ def put_profile_birth_data():
 def get_profile_basic():
     """Get user's basic profile information"""
     try:
-        profile = UserProfile.query.filter_by(user_id=g.user.id).first()
+        profile = UserProfile.query.filter_by(user_id=g.user).first()
         if not profile:
             response = jsonify({'ok': True, 'profile': None})
         else:
@@ -2983,7 +2983,7 @@ def put_profile_basic():
     """Update user's basic profile information"""
     try:
         # BE-DECOR-ORDER-06: Diagnostic logging
-        print(f"save.profile.put.start user_id={g.user.id} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
+        print(f"save.profile.put.start user_id={g.user} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
         
         # Ensure JSON request
         if not request.is_json:
@@ -3037,9 +3037,9 @@ def put_profile_basic():
             }), 400
         
         # Upsert profile
-        profile = UserProfile.query.filter_by(user_id=g.user.id).first()
+        profile = UserProfile.query.filter_by(user_id=g.user).first()
         if not profile:
-            profile = UserProfile(user_id=g.user.id)
+            profile = UserProfile(user_id=g.user)
             db.session.add(profile)
         
         # Update fields
@@ -3050,7 +3050,7 @@ def put_profile_basic():
         profile.updated_at = datetime.utcnow()
         
         # Update user's updated_at timestamp
-        user = User.query.get(g.user.id)
+        user = User.query.get(g.user)
         if user:
             user.updated_at = datetime.utcnow()
         
@@ -3089,15 +3089,15 @@ def get_profile_human_design():
     """Get user's human design data for profile management"""
     try:
         # Try to get from the new comprehensive HD table first
-        hd_data = HumanDesignData.query.filter_by(user_id=g.user.id).first()
+        hd_data = HumanDesignData.query.filter_by(user_id=g.user).first()
         if hd_data:
             return jsonify(hd_data.to_dict())
         
         # Fallback to birth_data chart_data for backward compatibility
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if birth_data and birth_data.chart_data:
             return jsonify({
-                'user_id': g.user.id,
+                'user_id': g.user,
                 'type': birth_data.chart_data.get('type'),
                 'strategy': birth_data.chart_data.get('strategy'),
                 'authority': birth_data.chart_data.get('authority'),
@@ -3170,12 +3170,12 @@ def update_birth_data():
                 print(f"[DEBUG] Validation error: {e}")
                 return jsonify({'error': f'Validation error: {str(e)}', 'success': False}), 400
         
-        print(f"[DEBUG] Getting birth data record for user {g.user.id}")
+        print(f"[DEBUG] Getting birth data record for user {g.user}")
         # Get or create birth data record
-        birth_data = BirthData.query.get(g.user.id)
+        birth_data = BirthData.query.get(g.user)
         if not birth_data:
             print("[DEBUG] Creating new birth data record")
-            birth_data = BirthData(user_id=g.user.id)
+            birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         else:
             print("[DEBUG] Found existing birth data record")
@@ -3189,7 +3189,7 @@ def update_birth_data():
             print("[DEBUG] Using structured format with transactional save")
             try:
                 from birth_data_saver import save_birth_data_transactional
-                saved_data = save_birth_data_transactional(db, BirthData, g.user.id, validated_data)
+                saved_data = save_birth_data_transactional(db, BirthData, g.user, validated_data)
                 print(f"[DEBUG] Transactional save successful: {saved_data}")
                 
                 # Skip the rest of the processing since transactional save handles everything
@@ -3253,7 +3253,7 @@ def update_birth_data():
         
         # Mark onboarding as completed if specified (only for legacy format)
         if birth_data_input and birth_data_input.get('onboarding_completed'):
-            user = User.query.get(g.user.id)
+            user = User.query.get(g.user)
             user.onboarding_completed = True
         
         db.session.commit()
@@ -3278,13 +3278,13 @@ def update_birth_data():
                 
                 # Extract comprehensive HD data using the new extraction engine
                 from hd_data_extractor import extract_hd_data_from_api
-                hd_data = extract_hd_data_from_api(hd_response, g.user.id)
+                hd_data = extract_hd_data_from_api(hd_response, g.user)
                 
                 # Add to session and commit both records
                 db.session.add(hd_data)
                 db.session.commit()
                 
-                print(f"Successfully extracted and stored comprehensive HD data for user {g.user.id}")
+                print(f"Successfully extracted and stored comprehensive HD data for user {g.user}")
                 
                 return jsonify({
                     'success': True,
@@ -3495,7 +3495,7 @@ def admin_update_user_status(user_id):
         
         # Log admin action
         log_admin_action(
-            admin_user_id=g.user.id,
+            admin_user_id=g.user,
             action='status_update',
             target_user_id=user_id,
             details=f'Changed status from {old_status} to {new_status}'
@@ -3522,7 +3522,7 @@ def admin_delete_user(user_id):
         
         # Log admin action before deletion
         log_admin_action(
-            admin_user_id=g.user.id,
+            admin_user_id=g.user,
             action='user_deletion',
             target_user_id=user_id,
             details=f'Deleted user {user.email}'
@@ -3591,7 +3591,7 @@ def admin_recalculate_compatibility():
         
         # Log admin action
         log_admin_action(
-            admin_user_id=g.user.id,
+            admin_user_id=g.user,
             action='compatibility_recalculation',
             details=f"Recalculated compatibility matrix: {result}"
         )
@@ -3675,7 +3675,7 @@ def change_password():
             return jsonify({'error': 'Current password and new password are required'}), 400
         
         # Get current user
-        current_user = User.query.get(g.user.id)
+        current_user = User.query.get(g.user)
         if not current_user:
             return jsonify({'error': 'User not found'}), 404
         
