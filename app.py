@@ -2049,32 +2049,34 @@ def auth_v2_me():
                 BirthData.birth_location,
                 BirthData.birth_instant_utc,
                 BirthData.tz_offset_minutes
-            ).outerjoin(
+            ).select_from(User).outerjoin(
                 UserProfile, User.id == UserProfile.user_id
             ).outerjoin(
                 BirthData, User.id == BirthData.user_id
             ).filter(User.id == user_id)
             
-            result = query.first()
-        except Exception as query_error:
-            app.logger.error(f"Database query error in /me: {query_error}")
-            # Fallback to basic user query
-            user = User.query.get(user_id)
-            if not user:
-                session.clear()
-                response = jsonify({
-                    'ok': False,
-                    'error': 'User not found',
-                    'code': 'USER_NOT_FOUND'
-                })
-                for header, value in response_headers.items():
-                    response.headers[header] = value
-                return response, 401
+            # Log compiled SQL for debugging
+            app.logger.info(f"me_join_sql user_id={user_id} query={str(query)}")
             
-            # Return basic response without enhanced fields
-            result = (user.id, user.email, user.status, user.is_admin, user.updated_at, 1,
-                     None, None, None, None,  # UserProfile fields (removed age)
-                     None, None, None, None, None, None, None, None)  # BirthData fields
+            result = query.first()
+            
+            # Log raw row for debugging
+            if result:
+                app.logger.info(f"me_join_row user_id={user_id} birth_date={result[10]} birth_time={result[11]}")
+            else:
+                app.logger.warning(f"me_join_row user_id={user_id} result=None")
+                
+        except Exception as query_error:
+            app.logger.error(f"me_join_error user_id={user_id} error={type(query_error).__name__}: {query_error}")
+            # Return 5xx instead of silent fallback
+            response = jsonify({
+                'ok': False,
+                'error': 'Database query failed',
+                'code': 'DB_QUERY_ERROR'
+            })
+            for header, value in response_headers.items():
+                response.headers[header] = value
+            return response, 500
         
         if not result:
             session.clear()
@@ -2152,7 +2154,7 @@ def auth_v2_me():
             },
             'birth_data': {
                 'date': birth_date.strftime('%Y-%m-%d') if birth_date else None,
-                'time': birth_time.strftime('%H:%M:%S') if birth_time else None,
+                'time': str(birth_time) if birth_time else None,  # Raw format for debugging
                 'timezone': timezone,
                 'latitude': float(latitude) if latitude is not None else None,
                 'longitude': float(longitude) if longitude is not None else None,
