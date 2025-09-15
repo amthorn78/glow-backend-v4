@@ -271,6 +271,27 @@ def api_preflight(any_path):
 
 
 # ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def format_birth_time_defensive(birth_time):
+    """A1R-H3: Defensive formatting for birth_time with string detection"""
+    if birth_time is None:
+        return None
+    
+    # If it's a time object, format as HH:mm
+    if hasattr(birth_time, 'strftime'):
+        return birth_time.strftime('%H:%M')
+    
+    # If it's a string, log warning and pass through (temporary for A2)
+    if isinstance(birth_time, str):
+        app.logger.warning(f"birth_time_string_detected value={birth_time} - should be cleaned by A2")
+        return birth_time
+    
+    # Fallback: convert to string
+    return str(birth_time)
+
+# ============================================================================
 # DATABASE MODELS
 # ============================================================================
 
@@ -336,13 +357,15 @@ class UserPriorities(db.Model):
         ]
 
 class UserProfile(db.Model):
-    """User profile data separated from authentication data"""
+    """Extended user profile information"""
     __tablename__ = 'user_profiles'
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
     first_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
+    display_name = db.Column(db.String(100))  # Added missing field
+    avatar_url = db.Column(db.String(255))    # Added missing field
     bio = db.Column(db.Text)
     age = db.Column(db.Integer)
     profile_completion = db.Column(db.Integer, default=0)
@@ -453,9 +476,9 @@ class BirthData(db.Model):
     location_importance = db.Column(db.Numeric(5, 4))
     location_osm_id = db.Column(db.BigInteger)
     location_osm_type = db.Column(db.String(20))
-    timezone = db.Column(db.String(50))
-    location_source = db.Column(db.String(20), default='manual')
-    location_verified = db.Column(db.Boolean, default=False)
+    timezone = db.Column(db.String(50))           # Added missing field
+    location_source = db.Column(db.String(50))    # Added missing field  
+    location_verified = db.Column(db.Boolean)     # Added missing field
     
     def to_dict(self):
         return {
@@ -2046,9 +2069,7 @@ def auth_v2_me():
                 BirthData.timezone,
                 BirthData.latitude,
                 BirthData.longitude,
-                BirthData.birth_location,
-                BirthData.birth_instant_utc,
-                BirthData.tz_offset_minutes
+                BirthData.birth_location
             ).select_from(User).outerjoin(
                 UserProfile, User.id == UserProfile.user_id
             ).outerjoin(
@@ -2094,8 +2115,7 @@ def auth_v2_me():
         try:
             (user_id, email, status, is_admin, updated_at, profile_version,
              display_name, avatar_url, bio, profile_completion,
-             birth_date, birth_time, timezone, latitude, longitude, birth_location,
-             birth_instant_utc, tz_offset_minutes) = result
+             birth_date, birth_time, timezone, latitude, longitude, birth_location) = result
         except (ValueError, TypeError) as unpack_error:
             app.logger.error(f"Result unpacking error in /me: {unpack_error}")
             # Use safe defaults
@@ -2103,7 +2123,6 @@ def auth_v2_me():
             profile_version = getattr(result, 'profile_version', 1) if hasattr(result, 'profile_version') else 1
             display_name = avatar_url = bio = profile_completion = None
             birth_date = birth_time = timezone = latitude = longitude = birth_location = None
-            birth_instant_utc = tz_offset_minutes = None
         
         # Session management and renewal logic using Redis session data
         now = datetime.utcnow()
@@ -2154,13 +2173,11 @@ def auth_v2_me():
             },
             'birth_data': {
                 'date': birth_date.strftime('%Y-%m-%d') if birth_date else None,
-                'time': str(birth_time) if birth_time else None,  # Raw format for debugging
+                'time': format_birth_time_defensive(birth_time),  # A1R-H3: Defensive HH:mm formatting
                 'timezone': timezone,
                 'latitude': float(latitude) if latitude is not None else None,
                 'longitude': float(longitude) if longitude is not None else None,
-                'location': birth_location,
-                'birth_instant_utc': birth_instant_utc.isoformat() + 'Z' if birth_instant_utc else None,
-                'tz_offset_minutes': tz_offset_minutes
+                'location': birth_location
             },
             'profile_version': profile_version or 1,
             'session_meta': {
