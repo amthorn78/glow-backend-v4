@@ -2039,7 +2039,6 @@ def auth_v2_me():
                 UserProfile.display_name,
                 UserProfile.avatar_url,
                 UserProfile.bio,
-                UserProfile.age,
                 UserProfile.profile_completion,
                 BirthData.birth_date,
                 BirthData.birth_time,
@@ -2073,7 +2072,7 @@ def auth_v2_me():
             
             # Return basic response without enhanced fields
             result = (user.id, user.email, user.status, user.is_admin, user.updated_at, 1,
-                     None, None, None, None, None,  # UserProfile fields
+                     None, None, None, None,  # UserProfile fields (removed age)
                      None, None, None, None, None, None, None, None)  # BirthData fields
         
         if not result:
@@ -2091,7 +2090,7 @@ def auth_v2_me():
         # Safely unpack query result
         try:
             (user_id, email, status, is_admin, updated_at, profile_version,
-             display_name, avatar_url, bio, age, profile_completion,
+             display_name, avatar_url, bio, profile_completion,
              birth_date, birth_time, timezone, latitude, longitude, birth_location,
              birth_instant_utc, tz_offset_minutes) = result
         except (ValueError, TypeError) as unpack_error:
@@ -2099,7 +2098,7 @@ def auth_v2_me():
             # Use safe defaults
             user_id, email, status, is_admin, updated_at = result[:5]
             profile_version = getattr(result, 'profile_version', 1) if hasattr(result, 'profile_version') else 1
-            display_name = avatar_url = bio = age = profile_completion = None
+            display_name = avatar_url = bio = profile_completion = None
             birth_date = birth_time = timezone = latitude = longitude = birth_location = None
             birth_instant_utc = tz_offset_minutes = None
         
@@ -2148,7 +2147,6 @@ def auth_v2_me():
                 'display_name': display_name,
                 'avatar_url': avatar_url,
                 'bio': bio,
-                'age': age,
                 'profile_completion': profile_completion
             },
             'birth_data': {
@@ -2722,7 +2720,6 @@ def get_profile():
             'first_name': profile.first_name,
             'last_name': profile.last_name,
             'bio': profile.bio,
-            'age': profile.age,
             'profile_completion': profile.profile_completion
         }
         
