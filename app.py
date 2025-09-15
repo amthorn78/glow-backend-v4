@@ -2826,11 +2826,14 @@ def get_profile_birth_data():
         return jsonify({'ok': False, 'error': 'Failed to get birth data'}), 500
 
 @app.route('/api/profile/birth-data', methods=['PUT'], strict_slashes=False)
-@csrf_protect(session_store, validate_auth_session)
 @require_auth
+@csrf_protect(session_store, validate_auth_session)
 def put_profile_birth_data():
     """Update user's birth data for profile management"""
     try:
+        # BE-DECOR-ORDER-06: Diagnostic logging
+        print(f"save.birth.put.start user_id={g.user.id} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
+        
         # Ensure JSON request
         if not request.is_json:
             return jsonify({'ok': False, 'code': 'VALIDATION', 'error': 'JSON required'}), 400
@@ -2964,11 +2967,14 @@ def get_profile_basic():
         return jsonify({'ok': False, 'error': 'Failed to get basic profile'}), 500
 
 @app.route('/api/profile/basic', methods=['PUT'], strict_slashes=False)
-@csrf_protect(session_store, validate_auth_session)
 @require_auth
+@csrf_protect(session_store, validate_auth_session)
 def put_profile_basic():
     """Update user's basic profile information"""
     try:
+        # BE-DECOR-ORDER-06: Diagnostic logging
+        print(f"save.profile.put.start user_id={g.user.id} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
+        
         # Ensure JSON request
         if not request.is_json:
             return jsonify({'ok': False, 'code': 'VALIDATION', 'error': 'JSON required'}), 400
