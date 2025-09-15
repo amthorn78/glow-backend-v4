@@ -16,7 +16,7 @@ import logging
 import time as time_module
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
-from flask import Flask, request, jsonify, session, make_response
+from flask import Flask, request, jsonify, session, make_response, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_session import Session
 from flask_limiter import Limiter
@@ -224,7 +224,7 @@ CORS(
         "origins": ALLOWED_ORIGIN_PATTERNS   # same allowlist
     }},
     supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type"],
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     expose_headers=["Content-Length"],
 )
@@ -262,7 +262,7 @@ def api_preflight(any_path):
     if req_headers:
         resp.headers["Access-Control-Allow-Headers"] = req_headers
     else:
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
     # Cache preflight (browsers may cap this; Safari often ~600s)
     resp.headers["Access-Control-Max-Age"] = "86400"
@@ -1151,46 +1151,40 @@ def verify_session_token(token):
         return None
 
 def require_auth(f):
-    """Decorator to require authentication"""
+    """Decorator to require session-based authentication (cookie sessions only)"""
     def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authentication required'}), 401
+        user, error_code = validate_auth_session()
         
-        token = auth_header.split(' ')[1]
-        user_id = verify_session_token(token)
+        if not user:
+            if error_code == "AUTH_REQUIRED":
+                return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
+            else:
+                return jsonify({'error': 'Session expired', 'code': 'SESSION_EXPIRED'}), 401
         
-        if not user_id:
-            return jsonify({'error': 'Invalid or expired token'}), 401
-        
-        # Add user_id to request context
-        request.current_user_id = user_id
+        # Add user to Flask g context for access in route handlers
+        g.user = user
         return f(*args, **kwargs)
     
     decorated_function.__name__ = f.__name__
     return decorated_function
 
 def require_admin(f):
-    """Decorator to require admin privileges"""
+    """Decorator to require admin privileges (session-based)"""
     def decorated_function(*args, **kwargs):
-        # First check authentication
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authentication required'}), 401
+        user, error_code = validate_auth_session()
         
-        token = auth_header.split(' ')[1]
-        user_id = verify_session_token(token)
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid or expired token'}), 401
+        if not user:
+            if error_code == "AUTH_REQUIRED":
+                return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
+            else:
+                return jsonify({'error': 'Session expired', 'code': 'SESSION_EXPIRED'}), 401
         
         # Check if user is admin
-        user = User.query.get(user_id)
-        if not user or not user.is_admin:
-            return jsonify({'error': 'Admin privileges required'}), 403
+        if not user.is_admin:
+            return jsonify({'error': 'Admin privileges required', 'code': 'ADMIN_REQUIRED'}), 403
         
-        # Add user_id to request context
-        request.current_user_id = user_id
+        # Add user to Flask g context
+        g.user = user
         return f(*args, **kwargs)
     
     decorated_function.__name__ = f.__name__
@@ -2805,25 +2799,33 @@ def update_profile():
 def get_profile_birth_data():
     """Get user's birth data for profile management"""
     try:
-        birth_data = BirthData.query.get(request.current_user_id)
+        birth_data = BirthData.query.get(g.user.id)
         if not birth_data:
-            return jsonify({'ok': True, 'birth_data': None})
+            response = jsonify({'ok': True, 'birth_data': None})
+        else:
+            response = jsonify({
+                'ok': True,
+                'birth_data': {
+                    'date': birth_data.birth_date.isoformat() if birth_data.birth_date else None,
+                    'time': birth_data.birth_time.strftime('%H:%M:%S') if birth_data.birth_time else None,
+                    'timezone': birth_data.timezone,
+                    'location': birth_data.birth_location,
+                    'latitude': float(birth_data.latitude) if birth_data.latitude else None,
+                    'longitude': float(birth_data.longitude) if birth_data.longitude else None,
+                }
+            })
         
-        return jsonify({
-            'ok': True,
-            'birth_data': {
-                'date': birth_data.birth_date.isoformat() if birth_data.birth_date else None,
-                'time': birth_data.birth_time.strftime('%H:%M:%S') if birth_data.birth_time else None,
-                'timezone': birth_data.timezone,
-                'location': birth_data.birth_location,
-                'latitude': float(birth_data.latitude) if birth_data.latitude else None,
-                'longitude': float(birth_data.longitude) if birth_data.longitude else None,
-            }
-        })
+        # JSON-only with no-store cache control
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     
     except Exception as e:
         print(f"Get profile birth data error: {e}")
-        return jsonify({'ok': False, 'error': 'Failed to get birth data'}), 500
+        response = jsonify({'ok': False, 'error': 'Failed to get birth data'})
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 500
 
 @app.route('/api/profile/birth-data', methods=['PUT'], strict_slashes=False)
 @require_auth
@@ -2946,25 +2948,33 @@ def put_profile_birth_data():
 def get_profile_basic():
     """Get user's basic profile information"""
     try:
-        profile = UserProfile.query.filter_by(user_id=request.current_user_id).first()
+        profile = UserProfile.query.filter_by(user_id=g.user.id).first()
         if not profile:
-            return jsonify({'ok': True, 'profile': None})
+            response = jsonify({'ok': True, 'profile': None})
+        else:
+            response = jsonify({
+                'ok': True,
+                'profile': {
+                    'first_name': profile.first_name,
+                    'last_name': profile.last_name,
+                    'display_name': f"{profile.first_name} {profile.last_name}".strip() if profile.first_name or profile.last_name else None,
+                    'avatar_url': None,  # Not implemented yet
+                    'bio': profile.bio,
+                    'age': profile.age,
+                }
+            })
         
-        return jsonify({
-            'ok': True,
-            'profile': {
-                'first_name': profile.first_name,
-                'last_name': profile.last_name,
-                'display_name': f"{profile.first_name} {profile.last_name}".strip() if profile.first_name or profile.last_name else None,
-                'avatar_url': None,  # Not implemented yet
-                'bio': profile.bio,
-                'age': profile.age,
-            }
-        })
+        # JSON-only with no-store cache control
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     
     except Exception as e:
         print(f"Get profile basic error: {e}")
-        return jsonify({'ok': False, 'error': 'Failed to get basic profile'}), 500
+        response = jsonify({'ok': False, 'error': 'Failed to get basic profile'})
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 500
 
 @app.route('/api/profile/basic', methods=['PUT'], strict_slashes=False)
 @require_auth

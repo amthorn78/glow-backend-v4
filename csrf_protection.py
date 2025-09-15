@@ -130,17 +130,17 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
     
     @app.route('/api/auth/csrf', methods=['GET'])
     def get_csrf_token():
-        """Endpoint to fetch/rotate CSRF token"""
+        """Endpoint to fetch/rotate CSRF token (session-based auth only)"""
         logger = app.logger
         
         try:
-            # Validate authentication
-            user_id, error_code = validate_auth_session()
-            if not user_id:
+            # Validate authentication using session-based auth
+            user, error_code = validate_auth_session()
+            if not user:
                 return jsonify({
                     'ok': False,
                     'error': 'Authentication required',
-                    'code': error_code
+                    'code': error_code or 'AUTH_REQUIRED'
                 }), 401
             
             # Generate new CSRF token
@@ -154,6 +154,9 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
                     session_data['csrf'] = csrf_token
                     # Update session with new CSRF token
                     session_store.update_session(session_id, session_data)
+                    
+                    # P1-BE-DIAG-04: Minimal diagnostics
+                    logger.info(f"csrf_rotate user_id={user.id} session_id={session_id} token_length={len(csrf_token)}")
             
             # Create response with new token
             response_data = {
