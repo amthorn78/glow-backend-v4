@@ -2844,84 +2844,80 @@ def get_profile_birth_data():
 @require_auth
 @csrf_protect(session_store, validate_auth_session)
 def put_profile_birth_data():
-    """Update user's birth data for profile management"""
+    """Update user's birth data for profile management - S3-A5a strict validation"""
     try:
         # BE-DECOR-ORDER-06: Diagnostic logging
         print(f"save.birth.put.start user_id={g.user} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
         
         # Ensure JSON request
         if not request.is_json:
-            return jsonify({'ok': False, 'code': 'VALIDATION', 'error': 'JSON required'}), 400
+            return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
         
         payload = request.get_json() or {}
         
-        # Extract and validate required fields
-        date_str = payload.get('date')
-        time_str = payload.get('time')
-        timezone_str = payload.get('timezone')
-        location_str = (payload.get('location') or '').strip() or None
-        latitude = payload.get('latitude')
-        longitude = payload.get('longitude')
+        # S3-A5a: Apply strict validation
+        from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
         
-        if not (date_str and time_str and timezone_str and location_str):
-            return jsonify({
-                'ok': False, 
-                'code': 'VALIDATION', 
-                'error': 'date, time, timezone, location required'
-            }), 400
-        
-        # Validate date format (YYYY-MM-DD)
         try:
-            birth_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({
-                'ok': False, 
-                'code': 'VALIDATION', 
-                'error': 'Invalid date format, use YYYY-MM-DD'
-            }), 400
-        
-        # Normalize and validate time format (HH:MM or HH:MM:SS -> HH:MM:SS)
-        try:
-            time_parts = time_str.split(':')
-            if len(time_parts) == 2:
-                time_normalized = f"{time_parts[0].zfill(2)}:{time_parts[1].zfill(2)}:00"
-            elif len(time_parts) == 3:
-                time_normalized = f"{time_parts[0].zfill(2)}:{time_parts[1].zfill(2)}:{time_parts[2].zfill(2)}"
-            else:
-                raise ValueError('Invalid time format')
+            # Map frontend field names to validator field names
+            validator_payload = {}
+            if 'date' in payload:
+                validator_payload['birth_date'] = payload['date']
+            if 'time' in payload:
+                validator_payload['birth_time'] = payload['time']
+            if 'timezone' in payload:
+                validator_payload['timezone'] = payload['timezone']
+            if 'location' in payload:
+                validator_payload['birth_location'] = payload['location']
+            if 'latitude' in payload:
+                validator_payload['latitude'] = payload['latitude']
+            if 'longitude' in payload:
+                validator_payload['longitude'] = payload['longitude']
             
-            birth_time = datetime.strptime(time_normalized, '%H:%M:%S').time()
-        except ValueError:
-            return jsonify({
-                'ok': False, 
-                'code': 'VALIDATION', 
-                'error': 'Invalid time format, use HH:MM or HH:MM:SS'
-            }), 400
+            # Validate with strict validator
+            validated_data = BirthDataValidator.validate_birth_data(validator_payload)
+            
+        except ValidationError as ve:
+            # Log validation failure
+            failed_fields = list(ve.details.keys())
+            app.logger.info(f"write_validation_fail route='PUT /api/profile/birth-data' fields={failed_fields} reason='validation_error'")
+            return create_validation_error_response(ve)
         
-        # Validate timezone (basic check)
-        try:
-            from zoneinfo import ZoneInfo
-            ZoneInfo(timezone_str)
-        except Exception:
-            return jsonify({
-                'ok': False, 
-                'code': 'VALIDATION', 
-                'error': 'Invalid timezone'
-            }), 400
+        # Extract validated values
+        birth_date = None
+        birth_time = None
+        timezone_str = validated_data.get('timezone')
+        location_str = validated_data.get('birth_location')
+        latitude = validated_data.get('latitude')
+        longitude = validated_data.get('longitude')
         
-        # Upsert birth data
+        # Convert validated strings to database types
+        if 'birth_date' in validated_data and validated_data['birth_date'] is not None:
+            birth_date = datetime.strptime(validated_data['birth_date'], '%Y-%m-%d').date()
+        
+        if 'birth_time' in validated_data and validated_data['birth_time'] is not None:
+            # Convert HH:mm to time object with seconds=00 (enforced by A4 constraint)
+            birth_time = datetime.strptime(validated_data['birth_time'] + ':00', '%H:%M:%S').time()
+        
+        # Upsert birth data (partial updates supported)
         birth_data = BirthData.query.get(g.user)
         if not birth_data:
             birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         
-        # Update fields
-        birth_data.birth_date = birth_date
-        birth_data.birth_time = birth_time
-        birth_data.timezone = timezone_str
-        birth_data.birth_location = location_str
-        birth_data.latitude = latitude
-        birth_data.longitude = longitude
+        # Update only provided fields (partial updates)
+        if birth_date is not None:
+            birth_data.birth_date = birth_date
+        if birth_time is not None:
+            birth_data.birth_time = birth_time
+        if timezone_str is not None:
+            birth_data.timezone = timezone_str
+        if location_str is not None:
+            birth_data.birth_location = location_str
+        if latitude is not None:
+            birth_data.latitude = latitude
+        if longitude is not None:
+            birth_data.longitude = longitude
         
         # Update user's updated_at timestamp
         user = User.query.get(g.user)
@@ -2930,16 +2926,16 @@ def put_profile_birth_data():
         
         db.session.commit()
         
-        # Return success response
+        # Return success response with HH:mm format (S3-A1R-H4 compliance)
         response_data = {
             'ok': True,
             'birth_data': {
-                'date': birth_date.isoformat(),
-                'time': birth_time.strftime('%H:%M:%S'),
-                'timezone': timezone_str,
-                'location': location_str,
-                'latitude': float(latitude) if latitude else None,
-                'longitude': float(longitude) if longitude else None,
+                'date': birth_data.birth_date.isoformat() if birth_data.birth_date else None,
+                'time': format_birth_time_strict(birth_data.birth_time) if birth_data.birth_time else None,
+                'timezone': birth_data.timezone,
+                'location': birth_data.birth_location,
+                'latitude': float(birth_data.latitude) if birth_data.latitude else None,
+                'longitude': float(birth_data.longitude) if birth_data.longitude else None,
             },
             'updated_at': datetime.utcnow().isoformat() + 'Z'
         }
@@ -2954,7 +2950,7 @@ def put_profile_birth_data():
     except Exception as e:
         print(f"Put profile birth data error: {e}")
         db.session.rollback()
-        return jsonify({'ok': False, 'error': 'Failed to update birth data'}), 500
+        return jsonify({'error': 'server_error', 'message': 'Failed to update birth data'}), 500
 
 @app.route('/api/profile/basic', methods=['GET'], strict_slashes=False)
 @require_auth
