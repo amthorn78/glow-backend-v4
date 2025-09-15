@@ -274,22 +274,18 @@ def api_preflight(any_path):
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def format_birth_time_defensive(birth_time):
-    """A1R-H3: Defensive formatting for birth_time with string detection"""
+def format_birth_time_strict(birth_time):
+    """S3-A1R-H4: Strict formatting for birth_time - TIME objects only"""
     if birth_time is None:
         return None
     
-    # If it's a time object, format as HH:mm
+    # Only accept time objects, format as HH:mm
     if hasattr(birth_time, 'strftime'):
         return birth_time.strftime('%H:%M')
     
-    # If it's a string, log warning and pass through (temporary for A2)
-    if isinstance(birth_time, str):
-        app.logger.warning(f"birth_time_string_detected value={birth_time} - should be cleaned by A2")
-        return birth_time
-    
-    # Fallback: convert to string
-    return str(birth_time)
+    # Reject non-time types with error logging
+    app.logger.error(f"birth_time_format_error route=me type={type(birth_time)} value={birth_time}")
+    raise ValueError(f"Invalid birth_time type: expected time, got {type(birth_time)}")
 
 # ============================================================================
 # DATABASE MODELS
@@ -2173,7 +2169,7 @@ def auth_v2_me():
             },
             'birth_data': {
                 'date': birth_date.strftime('%Y-%m-%d') if birth_date else None,
-                'time': format_birth_time_defensive(birth_time),  # A1R-H3: Defensive HH:mm formatting
+                'time': format_birth_time_strict(birth_time),  # S3-A1R-H4: Strict HH:mm formatting
                 'timezone': timezone,
                 'latitude': float(latitude) if latitude is not None else None,
                 'longitude': float(longitude) if longitude is not None else None,
