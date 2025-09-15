@@ -283,6 +283,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(20), default='pending')  # pending, approved, suspended
     is_admin = db.Column(db.Boolean, default=False, nullable=False)  # Admin privilege flag
+    profile_version = db.Column(db.Integer, nullable=False, default=1)  # Client hint/cache key
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
