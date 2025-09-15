@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 import redis
@@ -77,6 +78,9 @@ from session_revocation import (
 # ============================================================================
 app = Flask(__name__)
 
+# Configure ProxyFix for proper HTTPS detection behind Vercel/Railway proxy
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # Enable SQL logging for debugging
 app.config["SQLALCHEMY_ECHO"] = True
 logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
@@ -113,7 +117,7 @@ class Config:
     SESSION_FILE_DIR = '/tmp/glow_flask_sessions'  # Flask-Session filesystem dir
     
     # Cookie Configuration (Auth v2 spec)
-    SESSION_COOKIE_NAME = 'glow_session'
+    SESSION_COOKIE_NAME = 'flask_session'  # Different from our custom glow_session cookie
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SECURE = True  # HTTPS only
     SESSION_COOKIE_SAMESITE = 'Lax'
@@ -1479,6 +1483,25 @@ def debug_environment():
         'human_design_configured': bool(app.config['HD_API_KEY']),
         'cors_origins': app.config['CORS_ORIGINS']
     })
+
+@app.route('/api/_debug/cookies', methods=['GET'])
+def debug_cookies():
+    """Debug endpoint to check cookie state and request properties"""
+    response_data = {
+        'has_session': 'glow_session' in request.cookies,
+        'session_id': request.cookies.get('glow_session'),
+        'has_csrf_cookie': 'glow_csrf' in request.cookies,
+        'csrf_cookie': request.cookies.get('glow_csrf'),
+        'host': request.host,
+        'secure': request.is_secure,
+        'headers': dict(request.headers),
+        'all_cookies': dict(request.cookies)
+    }
+    
+    response = make_response(jsonify(response_data))
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 @app.route('/api/debug/test-human-design', methods=['POST'])
 def test_human_design_api():

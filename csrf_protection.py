@@ -32,30 +32,39 @@ def validate_csrf_token(session_store, logger):
     """
     # Get CSRF token from header
     csrf_header = request.headers.get('X-CSRF-Token')
-    if not csrf_header:
-        return False, 'CSRF_MISSING', 'CSRF token missing'
+    header_present = bool(csrf_header)
     
     # Get CSRF token from cookie
     csrf_cookie = request.cookies.get('glow_csrf')
+    cookie_present = bool(csrf_cookie)
+    
+    # Get session data
+    session_id = session.get('session_id')
+    session_data = session_store.get_session(session_id) if session_id else None
+    stored_csrf = session_data.get('csrf') if session_data else None
+    store_present = bool(stored_csrf)
+    
+    # Calculate comparisons
+    header_eq_cookie = csrf_header == csrf_cookie if (header_present and cookie_present) else False
+    header_eq_store = csrf_header == stored_csrf if (header_present and store_present) else False
+    cookie_eq_store = csrf_cookie == stored_csrf if (cookie_present and store_present) else False
+    
+    # Determine validation result
+    is_valid = header_present and cookie_present and store_present and header_eq_cookie and header_eq_store and cookie_eq_store
+    
+    # Enhanced diagnostics logging (I3)
+    logger.info(f"csrf_validate sid_from_cookie={session_id} header_present={header_present} cookie_present={cookie_present} store_present={store_present} header_eq_cookie={header_eq_cookie} header_eq_store={header_eq_store} cookie_eq_store={cookie_eq_store} status={'valid' if is_valid else 'invalid'}")
+    
+    # Return appropriate error
+    if not csrf_header:
+        return False, 'CSRF_MISSING', 'CSRF token missing'
     if not csrf_cookie:
         return False, 'CSRF_COOKIE_MISSING', 'CSRF cookie missing'
-    
-    # Check if header matches cookie (first validation)
-    if csrf_header != csrf_cookie:
+    if not header_eq_cookie:
         return False, 'CSRF_INVALID', 'CSRF validation failed'
-    
-    # Get session data to validate against stored CSRF
-    session_id = session.get('session_id')
-    if not session_id:
+    if not session_id or not session_data:
         return False, 'CSRF_INVALID', 'CSRF validation failed'
-    
-    session_data = session_store.get_session(session_id)
-    if not session_data:
-        return False, 'CSRF_INVALID', 'CSRF validation failed'
-    
-    # Check if token matches session-stored CSRF (second validation)
-    stored_csrf = session_data.get('csrf')
-    if not stored_csrf or csrf_header != stored_csrf:
+    if not stored_csrf or not header_eq_store:
         return False, 'CSRF_INVALID', 'CSRF validation failed'
     
     return True, None, None
