@@ -1919,10 +1919,14 @@ def auth_v2_login():
         
         # Issue both session and CSRF cookies using centralized helpers (BE-LOGIN-02)
         session_id = session.get('session_id')
+        app.logger.info(f"DEBUG: session_id from Flask session: {session_id}")
+        
         if session_id:
             # Import centralized cookie helpers
             from cookies import set_session_cookie, set_csrf_cookie
             from csrf_protection import generate_csrf_token
+            
+            app.logger.info(f"DEBUG: Setting cookies for session_id: {session_id}")
             
             # Set session cookie (HttpOnly=true)
             set_session_cookie(response, session_id, max_age=1800)
@@ -1939,6 +1943,35 @@ def auth_v2_login():
             
             # Login diagnostics logging (BE-LOGIN-02-C)
             app.logger.info(f"auth_login_issue user_id={user.id} has_session_cookie=true has_csrf_cookie=true domain=.glowme.io status=200")
+        else:
+            app.logger.error(f"DEBUG: No session_id found in Flask session - cookies not set!")
+            # Emergency fallback - try to get session_id from session store directly
+            try:
+                from cookies import set_session_cookie, set_csrf_cookie
+                from csrf_protection import generate_csrf_token
+                
+                # Create a new session if none exists
+                session_data = session_store.create_session(user.id)
+                fallback_session_id = session_data['session_id']
+                
+                # Set Flask session
+                session['session_id'] = fallback_session_id
+                session['user_id'] = user.id
+                
+                app.logger.info(f"DEBUG: Created fallback session: {fallback_session_id}")
+                
+                # Set cookies with fallback session
+                set_session_cookie(response, fallback_session_id, max_age=1800)
+                csrf_token = generate_csrf_token()
+                set_csrf_cookie(response, csrf_token, max_age=1800)
+                
+                # Store CSRF in session
+                session_data['csrf'] = csrf_token
+                session_store.update_session(fallback_session_id, session_data)
+                
+                app.logger.info(f"auth_login_issue_fallback user_id={user.id} has_session_cookie=true has_csrf_cookie=true domain=.glowme.io status=200")
+            except Exception as e:
+                app.logger.error(f"DEBUG: Fallback cookie setting failed: {e}")
         
         app.logger.info(f"Login successful for user {user.id}")
         return response, 200
