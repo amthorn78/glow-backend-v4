@@ -2540,6 +2540,7 @@ def get_birth_data():
 
 @app.route('/api/birth-data', methods=['POST'])
 @require_auth
+@csrf_protect(session_store, validate_auth_session)
 def save_birth_data():
     """Save user's birth data - G1_A5b_fix: strict validation with typed 400s"""
     try:
