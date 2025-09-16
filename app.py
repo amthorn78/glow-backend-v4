@@ -317,6 +317,79 @@ def log_request_shape_keys(route, payload):
         # Don't let logging errors mask the original validation error
         app.logger.error(f"request_shape_keys logging failed: {e}")
 
+def normalize_birth_data_request(route, payload):
+    """G2F_1: Normalize wrapper/camelCase to canonical snake_case before validation"""
+    try:
+        if not payload:
+            return {}
+        
+        # Feature flag check
+        if not os.getenv('COMPAT_INPUT_NORMALIZER', 'on').lower() in ['on', 'true', '1']:
+            return payload
+        
+        normalized = {}
+        aliases_used = []
+        wrapper_used = False
+        
+        # Alias mapping
+        alias_map = {
+            'date': 'birth_date',
+            'time': 'birth_time',
+            'birthDate': 'birth_date',
+            'birthTime': 'birth_time',
+            'birthLocation': 'birth_location',
+            'lat': 'latitude',
+            'lng': 'longitude',
+            'long': 'longitude'
+        }
+        
+        # Canonical fields
+        canonical_fields = ['birth_date', 'birth_time', 'birth_location', 'timezone', 'latitude', 'longitude', 'data_consent', 'sharing_consent']
+        
+        # Check for wrapper
+        wrapper_data = None
+        wrapper_keys = ['birth_data', 'birthData']
+        for wrapper_key in wrapper_keys:
+            if wrapper_key in payload and isinstance(payload[wrapper_key], dict):
+                wrapper_data = payload[wrapper_key]
+                wrapper_used = True
+                break
+        
+        # Process fields from wrapper or top-level
+        source_data = wrapper_data if wrapper_data else payload
+        
+        # Normalize fields
+        for key, value in source_data.items():
+            if key in canonical_fields:
+                # Canonical field - use as-is
+                normalized[key] = value
+            elif key in alias_map:
+                # Alias field - map to canonical
+                canonical_key = alias_map[key]
+                if canonical_key not in normalized:  # Canonical takes precedence
+                    normalized[canonical_key] = value
+                    aliases_used.append(key)
+            # Unknown fields are dropped silently
+        
+        # Copy non-wrapper top-level fields if no wrapper was used
+        if not wrapper_used:
+            for key, value in payload.items():
+                if key not in source_data and key in canonical_fields:
+                    normalized[key] = value
+        
+        # Emit logs
+        if aliases_used:
+            app.logger.info(f"field_alias_used route='{route}' aliases={aliases_used}")
+        if wrapper_used:
+            app.logger.info(f"wrapper_used route='{route}'")
+        
+        return normalized
+        
+    except Exception as e:
+        # Don't let normalization errors mask the original request
+        app.logger.error(f"request normalization failed for {route}: {e}")
+        return payload
+
 # ============================================================================
 # DATABASE MODELS
 # ============================================================================
@@ -2580,6 +2653,9 @@ def save_birth_data():
         
         payload = request.get_json() or {}
         
+        # G2F_1: Normalize wrapper/camelCase to canonical before validation
+        payload = normalize_birth_data_request('/api/birth-data', payload)
+        
         # G1_A5b_fix: Handle field aliases (time/date → birth_time/birth_date)
         validator_payload = {}
         alias_fields_used = []
@@ -2952,6 +3028,9 @@ def put_profile_birth_data():
         
         payload = request.get_json() or {}
         
+        # G2F_1: Normalize wrapper/camelCase to canonical before validation
+        payload = normalize_birth_data_request('PUT /api/profile/birth-data', payload)
+        
         # S3-A5a: Apply strict validation
         from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
         
@@ -3232,6 +3311,9 @@ def update_birth_data():
             return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
         
         payload = request.get_json() or {}
+        
+        # G2F_1: Normalize wrapper/camelCase to canonical before validation
+        payload = normalize_birth_data_request('/api/profile/update-birth-data', payload)
         
         # G2_A5c_fix: Handle field aliases (time/date → birth_time/birth_date)
         validator_payload = {}
