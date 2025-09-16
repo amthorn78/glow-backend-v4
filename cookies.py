@@ -82,20 +82,48 @@ def set_session_cookie(response, session_id, max_age=1800):
     """
     return set_cookie(response, 'glow_session', session_id, max_age=max_age)
 
+def set_csrf_cookie_with_fallback(response, csrf_token, max_age=1800):
+    """
+    Set CSRF cookie with domain fallback logic
+    CSRF cookies must be JS-readable (HttpOnly=false) for double-submit pattern
+    """
+    from flask import request
+    import logging
+    
+    configured_domain = SESSION_COOKIE_DOMAIN
+    host = request.host.split(':')[0]  # Strip port for comparison
+    
+    # Check if configured domain matches request host
+    use_domain = None
+    if configured_domain and configured_domain.startswith('.'):
+        # For .glowme.io, check if request host ends with glowme.io
+        if host.endswith(configured_domain[1:]):
+            use_domain = configured_domain
+        else:
+            # Domain mismatch - use host-only cookie for CSRF only
+            logger = logging.getLogger(__name__)
+            logger.info("csrf_issue stage=mint reason=domain_mismatch")
+    else:
+        use_domain = configured_domain
+    
+    # Set CSRF cookie with specific attributes (HttpOnly=false for JS access)
+    response.set_cookie(
+        'glow_csrf', 
+        csrf_token,
+        max_age=max_age,
+        domain=use_domain,  # None for host-only when domain mismatch
+        path='/',
+        httponly=False,     # CSRF cookies must be JS-readable
+        secure=SESSION_SECURE,
+        samesite=SESSION_SAMESITE
+    )
+    return response
+
 def set_csrf_cookie(response, csrf_token, max_age=1800):
     """
-    Set the CSRF cookie with proper security attributes
-    Note: CSRF cookies must be readable by JavaScript (httponly=False)
-    
-    Args:
-        response: Flask response object
-        csrf_token (str): CSRF token value
-        max_age (int): Cookie max age in seconds (default: 30 minutes)
-    
-    Returns:
-        Flask response object with CSRF cookie set
+    Set the CSRF cookie with domain fallback
     """
-    return set_cookie(response, 'glow_csrf', csrf_token, max_age=max_age, httponly=False)
+    return set_csrf_cookie_with_fallback(response, csrf_token, max_age)
 
 def clear_session_cookie(response):
     """

@@ -52,8 +52,15 @@ def validate_csrf_token(session_store, logger):
     # Determine validation result
     is_valid = header_present and cookie_present and store_present and header_eq_cookie and header_eq_store and cookie_eq_store
     
-    # Enhanced diagnostics logging (I3)
-    logger.info(f"csrf_validate sid_from_cookie={session_id} header_present={header_present} cookie_present={cookie_present} store_present={store_present} header_eq_cookie={header_eq_cookie} header_eq_store={header_eq_store} cookie_eq_store={cookie_eq_store} status={'valid' if is_valid else 'invalid'}")
+    # Enhanced diagnostics logging (keys-only)
+    if not is_valid:
+        if not csrf_header:
+            reason = 'missing'
+        elif not csrf_cookie:
+            reason = 'absent_cookie'
+        else:
+            reason = 'mismatch'
+        logger.info(f"csrf_issue stage=verify reason={reason}")
     
     # Return appropriate error
     if not csrf_header:
@@ -137,11 +144,13 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
             # Validate authentication using session-based auth
             user, error_code = validate_auth_session()
             if not user:
-                return jsonify({
+                response = jsonify({
                     'ok': False,
                     'error': 'Authentication required',
                     'code': error_code or 'AUTH_REQUIRED'
-                }), 401
+                })
+                response.headers['Cache-Control'] = 'no-store'
+                return response, 401
             
             # Generate new CSRF token
             csrf_token = generate_csrf_token()
@@ -154,14 +163,11 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
                     session_data['csrf'] = csrf_token
                     # Update session with new CSRF token
                     session_store.update_session(session_id, session_data)
-                    
-                    # P1-BE-DIAG-04: Minimal diagnostics
-                    logger.info(f"csrf_rotate user_id={user.id} session_id={session_id} token_length={len(csrf_token)}")
             
             # Create response with new token
             response_data = {
                 'ok': True,
-                'csrf': csrf_token
+                'csrf_token': csrf_token
             }
             
             response = make_response(jsonify(response_data))
@@ -172,17 +178,17 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
             # Set new CSRF cookie with proper max_age
             set_csrf_cookie(response, csrf_token, max_age=1800)
             
-            logger.info(f"csrf_rotate: user_id={user_id}, session_id={session_id}")
-            
             return response, 200
             
         except Exception as e:
-            logger.error(f"CSRF token rotation error: {e}")
-            return jsonify({
+            logger.info("csrf_issue stage=rotate reason=internal_error")
+            response = jsonify({
                 'ok': False,
                 'error': 'CSRF token rotation failed',
                 'code': 'INTERNAL_ERROR'
-            }), 500
+            })
+            response.headers['Cache-Control'] = 'no-store'
+            return response, 500
 
 def add_csrf_to_login(session_data, response, logger):
     """
