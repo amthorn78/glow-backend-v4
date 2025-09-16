@@ -3189,212 +3189,107 @@ def get_profile_human_design():
 
 @app.route('/api/profile/update-birth-data', methods=['POST'])
 @require_auth
+@csrf_protect(session_store, validate_auth_session)
 def update_birth_data():
-    """Update user birth data with structured validation and enhanced location support"""
+    """Update user birth data - G2_A5c_fix: strict validation with typed 400s"""
     try:
-        data = request.get_json()
-        print(f"[DEBUG] Raw request data: {data}")
+        # Ensure JSON request
+        if not request.is_json:
+            return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
         
-        # Initialize variables to avoid scope issues
-        birth_data_input = None
-        validated_data = None
+        payload = request.get_json() or {}
         
-        # Import validation schema
-        from birth_data_schema import validate_birth_data
+        # G2_A5c_fix: Handle field aliases (time/date → birth_time/birth_date)
+        validator_payload = {}
+        alias_fields_used = []
         
-        # Check if we're receiving structured data (new format) or legacy format
-        if 'birth_data' in data and isinstance(data['birth_data'], dict) and 'birth_date' in data['birth_data']:
-            print("[DEBUG] Detected legacy format")
-            # Legacy format - convert to structured format for validation
-            birth_data_input = data['birth_data']
-            
-            # Basic validation for legacy format
-            required_fields = ['birth_date', 'birth_location']
-            for field in required_fields:
-                if not birth_data_input.get(field):
-                    print(f"[DEBUG] Missing legacy field: {field}")
-                    return jsonify({'error': f'Missing required field: {field}'}), 400
-            
-            # Skip structured validation for legacy format
-            validated_data = None
-        else:
-            print("[DEBUG] Detected structured format, validating...")
-            # New structured format - validate with Pydantic (with fallback)
-            try:
-                # Try Pydantic validation first
-                try:
-                    from pydantic import ValidationError
-                    validated_data = validate_birth_data(data)
-                    print(f"[DEBUG] Pydantic validation successful: {validated_data}")
-                except ImportError:
-                    print("[DEBUG] Pydantic not available, using fallback validation")
-                    # Fallback validation without Pydantic
-                    from fallback_validation import validate_birth_data_fallback
-                    validated_data = validate_birth_data_fallback(data)
-                    print(f"[DEBUG] Fallback validation successful: {validated_data}")
-                except ValidationError as ve:
-                    print(f"[DEBUG] Pydantic validation failed: {ve.errors()}")
-                    # Return 422 with detailed field errors (not 500)
-                    return jsonify({
-                        'success': False,
-                        'errors': ve.errors(),
-                        'message': 'Validation failed'
-                    }), 422
-            except Exception as e:
-                print(f"[DEBUG] Validation error: {e}")
-                return jsonify({'error': f'Validation error: {str(e)}', 'success': False}), 400
+        # Map canonical and alias field names
+        field_mappings = {
+            'birth_date': 'birth_date',
+            'date': 'birth_date',
+            'birth_time': 'birth_time', 
+            'time': 'birth_time',
+            'birth_location': 'birth_location',
+            'latitude': 'latitude',
+            'longitude': 'longitude',
+            'timezone': 'timezone'
+        }
         
-        print(f"[DEBUG] Getting birth data record for user {g.user}")
+        for input_field, canonical_field in field_mappings.items():
+            if input_field in payload:
+                validator_payload[canonical_field] = payload[input_field]
+                # Log alias usage for future alignment
+                if input_field in ['date', 'time']:
+                    alias_fields_used.append(input_field)
+        
+        # Log field alias usage if applicable
+        if alias_fields_used:
+            app.logger.info(f"field_alias_used route='/api/profile/update-birth-data' alias_fields={alias_fields_used}")
+        
+        # G2_A5c_fix: Apply strict validation using same validator as PUT route
+        from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
+        
+        try:
+            validated_data = BirthDataValidator.validate_birth_data(validator_payload)
+        except ValidationError as ve:
+            # Log validation failure
+            failed_fields = list(ve.details.keys())
+            app.logger.info(f"write_validation_fail route='/api/profile/update-birth-data' fields={failed_fields} reason='validation_error'")
+            return create_validation_error_response(ve)
+        
+        # Convert validated strings to database types
+        birth_date = None
+        birth_time = None
+        timezone_str = validated_data.get('timezone')
+        location_str = validated_data.get('birth_location')
+        latitude = validated_data.get('latitude')
+        longitude = validated_data.get('longitude')
+        
+        if 'birth_date' in validated_data and validated_data['birth_date'] is not None:
+            birth_date = datetime.strptime(validated_data['birth_date'], '%Y-%m-%d').date()
+        
+        if 'birth_time' in validated_data and validated_data['birth_time'] is not None:
+            # Convert HH:mm to time object with seconds=00 (enforced by DB constraint)
+            birth_time = datetime.strptime(validated_data['birth_time'] + ':00', '%H:%M:%S').time()
+        
         # Get or create birth data record
         birth_data = BirthData.query.get(g.user)
         if not birth_data:
-            print("[DEBUG] Creating new birth data record")
             birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
-        else:
-            print("[DEBUG] Found existing birth data record")
         
-        if validated_data:
-            print("[DEBUG] Processing structured format data")
-            # New structured format - use validated data
-            # Compose ISO date/time strings ONLY AFTER validation
-        # Process validated data using ChatGPT's transactional approach
-        if validated_data:
-            print("[DEBUG] Using structured format with transactional save")
-            try:
-                from birth_data_saver import save_birth_data_transactional
-                saved_data = save_birth_data_transactional(db, BirthData, g.user, validated_data)
-                print(f"[DEBUG] Transactional save successful: {saved_data}")
-                
-                # Skip the rest of the processing since transactional save handles everything
-                return jsonify({
-                    'success': True,
-                    'message': 'Birth data updated successfully',
-                    'birth_data': saved_data
-                }), 200
-                
-            except Exception as e:
-                print(f"[DEBUG] Transactional save failed: {e}")
-                return jsonify({'error': f'Error saving validated data: {str(e)}', 'success': False}), 400
-            
-        else:
-            # Legacy format - existing parsing logic
-            try:
-                birth_data.birth_date = datetime.strptime(birth_data_input['birth_date'], '%Y-%m-%d').date()
-            except ValueError as e:
-                return jsonify({'error': f'Invalid birth date format. Expected YYYY-MM-DD, got: {birth_data_input["birth_date"]}'}), 400
-            
-            # Verify user is 18+ years old
-            today = datetime.now().date()
-            age = today.year - birth_data.birth_date.year - ((today.month, today.day) < (birth_data.birth_date.month, birth_data.birth_date.day))
-            if age < 18:
-                return jsonify({'error': 'You must be at least 18 years old to use this service'}), 400
-            
-            # Handle various time formats
-            birth_time_str = birth_data_input.get('birth_time')
-            if birth_time_str:
-                try:
-                    # Try parsing with zero-padded format first
-                    birth_data.birth_time = datetime.strptime(birth_time_str, '%H:%M').time()
-                except ValueError:
-                    try:
-                        # Try parsing without zero-padding (e.g., "2:28")
-                        parts = birth_time_str.split(':')
-                        if len(parts) == 2:
-                            hour = int(parts[0])
-                            minute = int(parts[1])
-                            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                                birth_data.birth_time = datetime.time(hour, minute)
-                            else:
-                                raise ValueError("Hour must be 0-23, minute must be 0-59")
-                        else:
-                            raise ValueError("Time must be in HH:MM format")
-                    except (ValueError, IndexError) as e:
-                        return jsonify({'error': f'Invalid birth time format. Expected HH:MM, got: {birth_time_str}'}), 400
-            else:
-                birth_data.birth_time = None
-            
-            birth_data.birth_location = birth_data_input['birth_location']
-            birth_data.data_consent = True
-            
-            # Handle coordinates for legacy format
-            if 'latitude' in birth_data_input and 'longitude' in birth_data_input:
-                birth_data.latitude = birth_data_input['latitude']
-                birth_data.longitude = birth_data_input['longitude']
+        # Update only provided fields (partial updates supported)
+        if birth_date is not None:
+            birth_data.birth_date = birth_date
+        if birth_time is not None:
+            birth_data.birth_time = birth_time
+        if location_str is not None:
+            birth_data.birth_location = location_str
+        if timezone_str is not None:
+            birth_data.timezone = timezone_str
+        if latitude is not None:
+            birth_data.latitude = latitude
+        if longitude is not None:
+            birth_data.longitude = longitude
         
-        # Note: Compatibility data is now handled by HumanDesignData model
-        # birth_data only stores basic birth information
-        
-        # Mark onboarding as completed if specified (only for legacy format)
-        if birth_data_input and birth_data_input.get('onboarding_completed'):
-            user = User.query.get(g.user)
-            user.onboarding_completed = True
+        # Set consent fields if provided
+        if 'data_consent' in payload:
+            birth_data.data_consent = payload.get('data_consent', False)
+        if 'sharing_consent' in payload:
+            birth_data.sharing_consent = payload.get('sharing_consent', False)
         
         db.session.commit()
         
-        # After successfully saving birth data, call Human Design API
-        try:
-            # Format data for Human Design API
-            api_data = {
-                'birth_date': birth_data.birth_date.strftime('%d-%b-%Y'),  # Format: 17-Mar-1978
-                'birth_time': birth_data.birth_time.strftime('%H:%M'),     # Format: 14:30
-                'birth_location': birth_data.birth_location
-            }
-            
-            print(f"Calling Human Design API with formatted data: {api_data}")
-            
-            # Call Human Design API
-            hd_response = call_human_design_api(api_data)
-            
-            if 'error' not in hd_response:
-                # HD chart data is stored in HumanDesignData model via extract_hd_data_from_api
-                # birth_data only stores basic birth information
-                
-                # Extract comprehensive HD data using the new extraction engine
-                from hd_data_extractor import extract_hd_data_from_api
-                hd_data = extract_hd_data_from_api(hd_response, g.user)
-                
-                # Add to session and commit both records
-                db.session.add(hd_data)
-                db.session.commit()
-                
-                print(f"Successfully extracted and stored comprehensive HD data for user {g.user}")
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'Birth data updated and comprehensive compatibility profile generated successfully',
-                    'birth_data': birth_data.to_dict(),
-                    'human_design_data': hd_data.to_dict(),
-                    'raw_api_response': hd_response
-                })
-            else:
-                # Birth data saved but Human Design API failed
-                print(f"Human Design API error: {hd_response['error']}")
-                return jsonify({
-                    'success': True,
-                    'message': 'Birth data updated successfully, but compatibility profile generation failed',
-                    'birth_data': birth_data.to_dict(),
-                    'human_design_error': hd_response['error']
-                })
-                
-        except Exception as hd_error:
-            print(f"Human Design API call failed: {hd_error}")
-            # Birth data is still saved, just HD processing failed
-            return jsonify({
-                'success': True,
-                'message': 'Birth data updated successfully, but compatibility profile processing encountered an error',
-                'birth_data': birth_data.to_dict(),
-                'human_design_error': str(hd_error)
-            })
+        return jsonify({
+            'success': True,
+            'message': 'Birth data updated successfully',
+            'birth_data': birth_data.to_dict()
+        })
     
     except Exception as e:
         db.session.rollback()
-        print(f"[DEBUG] Update birth data error: {e}")
-        print(f"[DEBUG] Error type: {type(e).__name__}")
-        print(f"[DEBUG] Error details: {str(e)}")
-        import traceback
-        print(f"[DEBUG] Full traceback: {traceback.format_exc()}")
-        return jsonify({'error': f'Failed to update birth data: {str(e)}'}), 500
+        app.logger.error(f"Unexpected error in update_birth_data: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 # ============================================================================
 # API ROUTES - ADMIN CONSOLE
