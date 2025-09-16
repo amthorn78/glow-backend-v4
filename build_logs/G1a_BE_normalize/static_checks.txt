@@ -1,0 +1,2 @@
+api/normalize.py: syntax OK
+app.py: syntax OK
