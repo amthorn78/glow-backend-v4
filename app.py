@@ -287,6 +287,36 @@ def format_birth_time_strict(birth_time):
     app.logger.error(f"birth_time_format_error route=me type={type(birth_time)} value={birth_time}")
     raise ValueError(f"Invalid birth_time type: expected time, got {type(birth_time)}")
 
+def log_request_shape_keys(route, payload):
+    """G2F_0: Log request field names only (no values) on validation errors"""
+    try:
+        if not payload:
+            return
+        
+        # Collect all top-level keys
+        keys = list(payload.keys())
+        
+        # Check for wrapper detection
+        wrapper_detected = any(key in ['birth_data', 'birthData'] for key in keys)
+        
+        # If wrapper present, also include child keys
+        if wrapper_detected:
+            for wrapper_key in ['birth_data', 'birthData']:
+                if wrapper_key in payload and isinstance(payload[wrapper_key], dict):
+                    child_keys = list(payload[wrapper_key].keys())
+                    keys.extend([f"{wrapper_key}.{child_key}" for child_key in child_keys])
+        
+        # Check for alias detection
+        alias_fields = ['birthDate', 'birthTime', 'birthLocation', 'date', 'time']
+        alias_detected = any(key in alias_fields for key in keys)
+        
+        # Emit structured log
+        app.logger.info(f"request_shape_keys route='{route}' keys={keys} alias_detected={alias_detected} wrapper_detected={wrapper_detected}")
+        
+    except Exception as e:
+        # Don't let logging errors mask the original validation error
+        app.logger.error(f"request_shape_keys logging failed: {e}")
+
 # ============================================================================
 # DATABASE MODELS
 # ============================================================================
@@ -2586,6 +2616,8 @@ def save_birth_data():
             # Log validation failure
             failed_fields = list(ve.details.keys())
             app.logger.info(f"write_validation_fail route='/api/birth-data' fields={failed_fields} reason='validation_error'")
+            # G2F_0: Log request shape keys on validation error
+            log_request_shape_keys('/api/birth-data', payload)
             return create_validation_error_response(ve)
         
         # Convert validated strings to database types
@@ -2946,6 +2978,8 @@ def put_profile_birth_data():
             # Log validation failure
             failed_fields = list(ve.details.keys())
             app.logger.info(f"write_validation_fail route='PUT /api/profile/birth-data' fields={failed_fields} reason='validation_error'")
+            # G2F_0: Log request shape keys on validation error
+            log_request_shape_keys('PUT /api/profile/birth-data', payload)
             return create_validation_error_response(ve)
         
         # Extract validated values
@@ -3235,6 +3269,8 @@ def update_birth_data():
             # Log validation failure
             failed_fields = list(ve.details.keys())
             app.logger.info(f"write_validation_fail route='/api/profile/update-birth-data' fields={failed_fields} reason='validation_error'")
+            # G2F_0: Log request shape keys on validation error
+            log_request_shape_keys('/api/profile/update-birth-data', payload)
             return create_validation_error_response(ve)
         
         # Convert validated strings to database types
