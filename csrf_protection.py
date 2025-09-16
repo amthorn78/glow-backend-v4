@@ -152,17 +152,26 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
                 response.headers['Cache-Control'] = 'no-store'
                 return response, 401
             
-            # Generate new CSRF token
-            csrf_token = generate_csrf_token()
-            
-            # Store in session
+            # Mint-or-return logic: use existing token if present, mint if missing
             session_id = session.get('session_id')
+            csrf_token = None
+            
             if session_id:
                 session_data = session_store.get_session(session_id)
-                if session_data:
-                    session_data['csrf'] = csrf_token
-                    # Update session with new CSRF token
-                    session_store.update_session(session_id, session_data)
+                if session_data and session_data.get('csrf'):
+                    # Return existing token
+                    csrf_token = session_data['csrf']
+            
+            if not csrf_token:
+                # Mint new token if missing
+                csrf_token = generate_csrf_token()
+                
+                # Store in session
+                if session_id:
+                    session_data = session_store.get_session(session_id)
+                    if session_data:
+                        session_data['csrf'] = csrf_token
+                        session_store.update_session(session_id, session_data)
             
             # Create response with new token
             response_data = {
