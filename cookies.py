@@ -87,24 +87,24 @@ def set_csrf_cookie_with_fallback(response, csrf_token, max_age=1800):
     Set CSRF cookie with domain fallback logic
     CSRF cookies must be JS-readable (HttpOnly=false) for double-submit pattern
     """
-    from flask import request
+    from flask import request, has_request_context
     import logging
     
     configured_domain = SESSION_COOKIE_DOMAIN
-    host = request.host.split(':')[0]  # Strip port for comparison
+    use_domain = configured_domain
     
-    # Check if configured domain matches request host
-    use_domain = None
-    if configured_domain and configured_domain.startswith('.'):
-        # For .glowme.io, check if request host ends with glowme.io
-        if host.endswith(configured_domain[1:]):
-            use_domain = configured_domain
-        else:
-            # Domain mismatch - use host-only cookie for CSRF only
-            logger = logging.getLogger(__name__)
-            logger.info("csrf_issue stage=mint reason=domain_mismatch")
-    else:
-        use_domain = configured_domain
+    # Only do domain fallback logic if we're in a request context
+    if has_request_context():
+        host = request.host.split(':')[0]  # Strip port for comparison
+        
+        # Check if configured domain matches request host
+        if configured_domain and configured_domain.startswith('.'):
+            # For .glowme.io, check if request host ends with glowme.io
+            if not host.endswith(configured_domain[1:]):
+                # Domain mismatch - use host-only cookie for CSRF only
+                logger = logging.getLogger(__name__)
+                logger.info("csrf_issue stage=mint reason=domain_mismatch")
+                use_domain = None
     
     # Set CSRF cookie with specific attributes (HttpOnly=false for JS access)
     response.set_cookie(

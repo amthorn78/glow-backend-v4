@@ -185,7 +185,7 @@ def create_csrf_endpoints(app, session_store, validate_auth_session):
             response.headers['Vary'] = 'Origin'
             
             # Set new CSRF cookie with proper max_age
-            set_csrf_cookie(response, csrf_token, max_age=1800)
+            set_csrf_cookie(response, csrf_token)
             
             return response, 200
             
