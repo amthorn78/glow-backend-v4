@@ -251,6 +251,9 @@ def add_security_headers(resp):
         resp.headers['X-Content-Type-Options'] = 'nosniff'
         resp.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         resp.headers['X-Frame-Options'] = 'DENY'
+        # Prevent caching of sensitive API responses
+        resp.headers['Cache-Control'] = 'no-store'
+        resp.headers['Pragma'] = 'no-cache'
     return resp
 
 # OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
