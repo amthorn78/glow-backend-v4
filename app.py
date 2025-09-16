@@ -242,6 +242,17 @@ def add_cors_headers(resp):
         resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     return resp
 
+@app.after_request
+def add_security_headers(resp):
+    """Add standard security headers to all API responses"""
+    if request.path.startswith('/api/'):
+        # Add security headers (do not overwrite existing headers)
+        resp.headers.setdefault('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        resp.headers.setdefault('X-Frame-Options', 'DENY')
+    return resp
+
 # OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
 @app.route("/api/<path:any_path>", methods=["OPTIONS"])
 def api_preflight(any_path):
