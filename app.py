@@ -255,6 +255,26 @@ def add_security_headers(resp):
         # Prevent caching of sensitive API responses
         resp.headers['Cache-Control'] = 'no-store'
         resp.headers['Pragma'] = 'no-cache'
+        
+        # S7-FSR-CLOSE: Additional hardening headers
+        # CSP (report-only) – safe for JSON; no blocking of app behavior
+        resp.headers['Content-Security-Policy-Report-Only'] = (
+            "default-src 'none'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'none'; "
+            "form-action 'self'; "
+            "connect-src 'self'"
+        )
+        
+        # Lock down powerful features we don't use from API context
+        resp.headers['Permissions-Policy'] = (
+            "geolocation=(), camera=(), microphone=(), payment=(), usb=(), "
+            "accelerometer=(), gyroscope=(), magnetometer=()"
+        )
+        
+        # Cross-origin isolation hardening (safe for API)
+        resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+        resp.headers['Cross-Origin-Resource-Policy'] = 'same-site'
     return resp
 
 # OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
