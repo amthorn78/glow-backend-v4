@@ -80,7 +80,18 @@ def set_session_cookie(response, session_id, max_age=1800):
     Returns:
         Flask response object with session cookie set
     """
-    return set_cookie(response, 'glow_session', session_id, max_age=max_age)
+    # Session cookies must be HttpOnly for security
+    response.set_cookie(
+        'glow_session',
+        session_id,
+        max_age=max_age,
+        domain=SESSION_COOKIE_DOMAIN,
+        path='/',
+        httponly=True,      # Prevent JS access to session cookie
+        secure=True,        # HTTPS only (always true in prod)
+        samesite='Lax'      # CSRF protection while allowing navigation
+    )
+    return response
 
 def set_csrf_cookie_with_fallback(response, csrf_token, max_age=1800):
     """
@@ -106,7 +117,7 @@ def set_csrf_cookie_with_fallback(response, csrf_token, max_age=1800):
                 logger.info("csrf_issue stage=mint reason=domain_mismatch")
                 use_domain = None
     
-    # Set CSRF cookie with specific attributes (HttpOnly=false for JS access)
+    # Set CSRF cookie with hardened security attributes
     response.set_cookie(
         'glow_csrf', 
         csrf_token,
@@ -114,8 +125,8 @@ def set_csrf_cookie_with_fallback(response, csrf_token, max_age=1800):
         domain=use_domain,  # None for host-only when domain mismatch
         path='/',
         httponly=False,     # CSRF cookies must be JS-readable
-        secure=SESSION_SECURE,
-        samesite=SESSION_SAMESITE
+        secure=True,        # HTTPS only (always true in prod)
+        samesite='Lax'      # CSRF protection while allowing navigation
     )
     return response
 
