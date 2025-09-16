@@ -28,6 +28,7 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from argon2 import PasswordHasher
+from rate_limit import login_rate_limiter
 from argon2.exceptions import VerifyMismatchError
 import redis
 
@@ -1936,6 +1937,20 @@ def auth_v2_login():
         email = data['email'].lower().strip()
         password = data['password']
         
+        # S7-MP4: Check rate limit before processing
+        retry_after = login_rate_limiter.check_rate_limit(request, email)
+        if retry_after is not None:
+            response = make_response(jsonify({
+                'ok': False,
+                'error': 'rate_limited',
+                'code': 'RATE_LIMIT_LOGIN',
+                'retry_after': retry_after
+            }), 429)
+            response.headers['Retry-After'] = str(retry_after)
+            response.headers['Cache-Control'] = 'no-store'
+            response.headers['Vary'] = 'Origin'
+            return response
+        
         # Rate limiting log
         app.logger.info(f"Login attempt for email: {hashlib.sha256(email.encode()).hexdigest()[:8]}")
         
@@ -1943,6 +1958,8 @@ def auth_v2_login():
         user = User.query.filter_by(email=email).first()
         if not user:
             app.logger.info(f"Login failed: user not found for email hash {hashlib.sha256(email.encode()).hexdigest()[:8]}")
+            # S7-MP4: Record failed attempt
+            login_rate_limiter.record_failed_attempt(request, email)
             return jsonify({
                 'ok': False,
                 'error': 'Invalid credentials',
@@ -1965,6 +1982,8 @@ def auth_v2_login():
         
         if not password_valid:
             app.logger.info(f"Login failed: invalid password for user {user.id}")
+            # S7-MP4: Record failed attempt
+            login_rate_limiter.record_failed_attempt(request, email)
             return jsonify({
                 'ok': False,
                 'error': 'Invalid credentials',
@@ -1987,6 +2006,9 @@ def auth_v2_login():
                 'error': 'Failed to create session',
                 'code': 'SESSION_ERROR'
             }), 500
+        
+        # S7-MP4: Clear user bucket on successful login
+        login_rate_limiter.clear_user_bucket(request, email)
         
         # Success response (Auth v2 contract)
         response_data = {
