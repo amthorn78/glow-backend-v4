@@ -72,6 +72,7 @@ from csrf_protection import (
 from session_revocation import (
     create_revocation_endpoints, track_session_on_login, untrack_session_on_logout
 )
+from api.normalize import normalize_birth_data_request
 
 # ============================================================================
 # APPLICATION SETUP
@@ -316,79 +317,6 @@ def log_request_shape_keys(route, payload):
     except Exception as e:
         # Don't let logging errors mask the original validation error
         app.logger.error(f"request_shape_keys logging failed: {e}")
-
-def normalize_birth_data_request(route, payload):
-    """G2F_1: Normalize wrapper/camelCase to canonical snake_case before validation"""
-    try:
-        if not payload:
-            return {}
-        
-        # Feature flag check
-        if not os.getenv('COMPAT_INPUT_NORMALIZER', 'on').lower() in ['on', 'true', '1']:
-            return payload
-        
-        normalized = {}
-        aliases_used = []
-        wrapper_used = False
-        
-        # Alias mapping
-        alias_map = {
-            'date': 'birth_date',
-            'time': 'birth_time',
-            'birthDate': 'birth_date',
-            'birthTime': 'birth_time',
-            'birthLocation': 'birth_location',
-            'lat': 'latitude',
-            'lng': 'longitude',
-            'long': 'longitude'
-        }
-        
-        # Canonical fields
-        canonical_fields = ['birth_date', 'birth_time', 'birth_location', 'timezone', 'latitude', 'longitude', 'data_consent', 'sharing_consent']
-        
-        # Check for wrapper
-        wrapper_data = None
-        wrapper_keys = ['birth_data', 'birthData']
-        for wrapper_key in wrapper_keys:
-            if wrapper_key in payload and isinstance(payload[wrapper_key], dict):
-                wrapper_data = payload[wrapper_key]
-                wrapper_used = True
-                break
-        
-        # Process fields from wrapper or top-level
-        source_data = wrapper_data if wrapper_data else payload
-        
-        # Normalize fields
-        for key, value in source_data.items():
-            if key in canonical_fields:
-                # Canonical field - use as-is
-                normalized[key] = value
-            elif key in alias_map:
-                # Alias field - map to canonical
-                canonical_key = alias_map[key]
-                if canonical_key not in normalized:  # Canonical takes precedence
-                    normalized[canonical_key] = value
-                    aliases_used.append(key)
-            # Unknown fields are dropped silently
-        
-        # Copy non-wrapper top-level fields if no wrapper was used
-        if not wrapper_used:
-            for key, value in payload.items():
-                if key not in source_data and key in canonical_fields:
-                    normalized[key] = value
-        
-        # Emit logs
-        if aliases_used:
-            app.logger.info(f"field_alias_used route='{route}' aliases={aliases_used}")
-        if wrapper_used:
-            app.logger.info(f"wrapper_used route='{route}'")
-        
-        return normalized
-        
-    except Exception as e:
-        # Don't let normalization errors mask the original request
-        app.logger.error(f"request normalization failed for {route}: {e}")
-        return payload
 
 # ============================================================================
 # DATABASE MODELS
@@ -2645,76 +2573,34 @@ def get_birth_data():
 @require_auth
 @csrf_protect(session_store, validate_auth_session)
 def save_birth_data():
-    """Save user's birth data - G1_A5b_fix: strict validation with typed 400s"""
+    """Save user's birth data"""
     try:
-        # Ensure JSON request
-        if not request.is_json:
-            return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
         
-        payload = request.get_json() or {}
+        # Normalize request
+        from birth_data_validator import BirthDataValidator, ValidationError
         
-        # G2F_1: Normalize wrapper/camelCase to canonical before validation
-        payload = normalize_birth_data_request('/api/birth-data', payload)
+        normalized_data = normalize_birth_data_request(data, 'POST /api/birth-data')
         
-        # G1_A5b_fix: Handle field aliases (time/date → birth_time/birth_date)
-        validator_payload = {}
-        alias_fields_used = []
-        
-        # Map canonical and alias field names
-        field_mappings = {
-            'birth_date': 'birth_date',
-            'date': 'birth_date',
-            'birth_time': 'birth_time', 
-            'time': 'birth_time',
-            'birth_location': 'birth_location',
-            'latitude': 'latitude',
-            'longitude': 'longitude',
-            'timezone': 'timezone'
-        }
-        
-        for input_field, canonical_field in field_mappings.items():
-            if input_field in payload:
-                validator_payload[canonical_field] = payload[input_field]
-                # Log alias usage for future alignment
-                if input_field in ['date', 'time']:
-                    alias_fields_used.append(input_field)
-        
-        # Log field alias usage if applicable
-        if alias_fields_used:
-            app.logger.info(f"field_alias_used route='/api/birth-data' alias_fields={alias_fields_used}")
-        
-        # G1_A5b_fix: Apply strict validation using same validator as PUT route
-        from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
-        
+        # Validate using central validator (validates only provided keys - intrinsic partial mode)
         try:
-            validated_data = BirthDataValidator.validate_birth_data(validator_payload)
-        except ValidationError as ve:
-            # Log validation failure
-            failed_fields = list(ve.details.keys())
-            app.logger.info(f"write_validation_fail route='/api/birth-data' fields={failed_fields} reason='validation_error'")
-            # G2F_0: Log request shape keys on validation error
-            log_request_shape_keys('/api/birth-data', payload)
-            return create_validation_error_response(ve)
-        
-        # Convert validated strings to database types
-        birth_date = None
-        birth_time = None
-        timezone_str = validated_data.get('timezone')
-        location_str = validated_data.get('birth_location')
-        latitude = validated_data.get('latitude')
-        longitude = validated_data.get('longitude')
-        
-        if 'birth_date' in validated_data and validated_data['birth_date'] is not None:
-            birth_date = datetime.strptime(validated_data['birth_date'], '%Y-%m-%d').date()
-        
-        if 'birth_time' in validated_data and validated_data['birth_time'] is not None:
-            # Convert HH:mm to time object with seconds=00 (enforced by DB constraint)
-            birth_time = datetime.strptime(validated_data['birth_time'] + ':00', '%H:%M:%S').time()
-        
-        # Geocode location if provided
-        coordinates = None
-        if location_str:
-            coordinates = geocode_location(location_str)
+            validated_data = BirthDataValidator.validate_birth_data(normalized_data)
+        except ValidationError as e:
+            # Log request shape on validation failure with diagnostics
+            app.logger.info("request_shape_keys", extra={
+                'route': 'POST /api/birth-data',
+                'keys': list(data.keys()),
+                'validation_errors': list(e.details.keys()),
+                'alias_detected': 'birthDate' in data or 'birthTime' in data or 'date' in data or 'time' in data,
+                'wrapper_detected': 'birth_data' in data or 'birthData' in data
+            })
+            return jsonify({
+                'error': 'validation_error',
+                'message': 'One or more fields are invalid',
+                'details': e.details
+            }), 400
         
         # Get or create birth data record
         birth_data = BirthData.query.get(g.user)
@@ -2722,30 +2608,16 @@ def save_birth_data():
             birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         
-        # Update only provided fields (partial updates supported)
-        if birth_date is not None:
-            birth_data.birth_date = birth_date
-        if birth_time is not None:
-            birth_data.birth_time = birth_time
-        if location_str is not None:
-            birth_data.birth_location = location_str
-        if timezone_str is not None:
-            birth_data.timezone = timezone_str
-        if latitude is not None:
-            birth_data.latitude = latitude
-        if longitude is not None:
-            birth_data.longitude = longitude
+        # Update only provided fields
+        for field, value in validated_data.items():
+            setattr(birth_data, field, value)
         
-        # Set coordinates from geocoding if available
-        if coordinates:
-            birth_data.latitude = Decimal(str(coordinates['latitude']))
-            birth_data.longitude = Decimal(str(coordinates['longitude']))
-        
-        # Set consent fields if provided
-        if 'data_consent' in payload:
-            birth_data.data_consent = payload.get('data_consent', False)
-        if 'sharing_consent' in payload:
-            birth_data.sharing_consent = payload.get('sharing_consent', False)
+        # Log successful save
+        app.logger.info("save_attempt", extra={
+            'route': 'POST /api/birth-data',
+            'accepted_keys': list(validated_data.keys()),
+            'status': 'success'
+        })
         
         db.session.commit()
         
@@ -3304,71 +3176,32 @@ def get_profile_human_design():
 @require_auth
 @csrf_protect(session_store, validate_auth_session)
 def update_birth_data():
-    """Update user birth data - G2_A5c_fix: strict validation with typed 400s"""
+    """Update user birth data with enhanced location support and recalculate compatibility"""
     try:
-        # Ensure JSON request
-        if not request.is_json:
-            return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
+        data = request.get_json()
         
-        payload = request.get_json() or {}
+        # Normalize request
+        from birth_data_validator import BirthDataValidator, ValidationError
         
-        # G2F_1: Normalize wrapper/camelCase to canonical before validation
-        payload = normalize_birth_data_request('/api/profile/update-birth-data', payload)
+        normalized_data = normalize_birth_data_request(data, 'POST /api/profile/update-birth-data')
         
-        # G2_A5c_fix: Handle field aliases (time/date → birth_time/birth_date)
-        validator_payload = {}
-        alias_fields_used = []
-        
-        # Map canonical and alias field names
-        field_mappings = {
-            'birth_date': 'birth_date',
-            'date': 'birth_date',
-            'birth_time': 'birth_time', 
-            'time': 'birth_time',
-            'birth_location': 'birth_location',
-            'latitude': 'latitude',
-            'longitude': 'longitude',
-            'timezone': 'timezone'
-        }
-        
-        for input_field, canonical_field in field_mappings.items():
-            if input_field in payload:
-                validator_payload[canonical_field] = payload[input_field]
-                # Log alias usage for future alignment
-                if input_field in ['date', 'time']:
-                    alias_fields_used.append(input_field)
-        
-        # Log field alias usage if applicable
-        if alias_fields_used:
-            app.logger.info(f"field_alias_used route='/api/profile/update-birth-data' alias_fields={alias_fields_used}")
-        
-        # G2_A5c_fix: Apply strict validation using same validator as PUT route
-        from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
-        
+        # Validate using central validator (validates only provided keys - intrinsic partial mode)
         try:
-            validated_data = BirthDataValidator.validate_birth_data(validator_payload)
-        except ValidationError as ve:
-            # Log validation failure
-            failed_fields = list(ve.details.keys())
-            app.logger.info(f"write_validation_fail route='/api/profile/update-birth-data' fields={failed_fields} reason='validation_error'")
-            # G2F_0: Log request shape keys on validation error
-            log_request_shape_keys('/api/profile/update-birth-data', payload)
-            return create_validation_error_response(ve)
-        
-        # Convert validated strings to database types
-        birth_date = None
-        birth_time = None
-        timezone_str = validated_data.get('timezone')
-        location_str = validated_data.get('birth_location')
-        latitude = validated_data.get('latitude')
-        longitude = validated_data.get('longitude')
-        
-        if 'birth_date' in validated_data and validated_data['birth_date'] is not None:
-            birth_date = datetime.strptime(validated_data['birth_date'], '%Y-%m-%d').date()
-        
-        if 'birth_time' in validated_data and validated_data['birth_time'] is not None:
-            # Convert HH:mm to time object with seconds=00 (enforced by DB constraint)
-            birth_time = datetime.strptime(validated_data['birth_time'] + ':00', '%H:%M:%S').time()
+            validated_data = BirthDataValidator.validate_birth_data(normalized_data)
+        except ValidationError as e:
+            # Log request shape on validation failure with diagnostics
+            app.logger.info("request_shape_keys", extra={
+                'route': 'POST /api/profile/update-birth-data',
+                'keys': list(data.keys()),
+                'validation_errors': list(e.details.keys()),
+                'alias_detected': 'birthDate' in data or 'birthTime' in data or 'date' in data or 'time' in data,
+                'wrapper_detected': 'birth_data' in data or 'birthData' in data
+            })
+            return jsonify({
+                'error': 'validation_error',
+                'message': 'One or more fields are invalid',
+                'details': e.details
+            }), 400
         
         # Get or create birth data record
         birth_data = BirthData.query.get(g.user)
@@ -3376,25 +3209,18 @@ def update_birth_data():
             birth_data = BirthData(user_id=g.user)
             db.session.add(birth_data)
         
-        # Update only provided fields (partial updates supported)
-        if birth_date is not None:
-            birth_data.birth_date = birth_date
-        if birth_time is not None:
-            birth_data.birth_time = birth_time
-        if location_str is not None:
-            birth_data.birth_location = location_str
-        if timezone_str is not None:
-            birth_data.timezone = timezone_str
-        if latitude is not None:
-            birth_data.latitude = latitude
-        if longitude is not None:
-            birth_data.longitude = longitude
+        # Update only provided fields
+        for field, value in validated_data.items():
+            setattr(birth_data, field, value)
         
-        # Set consent fields if provided
-        if 'data_consent' in payload:
-            birth_data.data_consent = payload.get('data_consent', False)
-        if 'sharing_consent' in payload:
-            birth_data.sharing_consent = payload.get('sharing_consent', False)
+        # Log successful save
+        app.logger.info("save_attempt", extra={
+            'route': 'POST /api/profile/update-birth-data',
+            'accepted_keys': list(validated_data.keys()),
+            'status': 'success'
+        })
+        
+        # ... rest of existing logic (HD API calls, etc.)
         
         db.session.commit()
         
