@@ -2891,46 +2891,25 @@ def get_profile_birth_data():
 def put_profile_birth_data():
     """Update user's birth data for profile management - S3-A5a strict validation"""
     try:
-        # BE-DECOR-ORDER-06: Diagnostic logging
-        print(f"save.birth.put.start user_id={g.user} has_csrf_header={bool(request.headers.get('X-CSRF-Token'))} has_session_cookie={bool(request.cookies.get('glow_session'))}")
-        
         # Ensure JSON request
         if not request.is_json:
             return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
         
-        payload = request.get_json() or {}
+        raw = request.get_json(silent=True) or {}
         
         # G2F_1: Normalize wrapper/camelCase to canonical before validation
-        payload = normalize_birth_data_request('PUT /api/profile/birth-data', payload)
+        normalized_data = normalize_birth_data_request(raw, 'PUT /api/profile/birth-data')
         
         # S3-A5a: Apply strict validation
         from birth_data_validator import BirthDataValidator, ValidationError, create_validation_error_response
         
         try:
-            # Map frontend field names to validator field names
-            validator_payload = {}
-            if 'date' in payload:
-                validator_payload['birth_date'] = payload['date']
-            if 'time' in payload:
-                validator_payload['birth_time'] = payload['time']
-            if 'timezone' in payload:
-                validator_payload['timezone'] = payload['timezone']
-            if 'location' in payload:
-                validator_payload['birth_location'] = payload['location']
-            if 'latitude' in payload:
-                validator_payload['latitude'] = payload['latitude']
-            if 'longitude' in payload:
-                validator_payload['longitude'] = payload['longitude']
-            
-            # Validate with strict validator
-            validated_data = BirthDataValidator.validate_birth_data(validator_payload)
+            # Validate using central validator (validates only provided keys - intrinsic partial mode)
+            validated_data = BirthDataValidator.validate_birth_data(normalized_data)
             
         except ValidationError as ve:
-            # Log validation failure
-            failed_fields = list(ve.details.keys())
-            app.logger.info(f"write_validation_fail route='PUT /api/profile/birth-data' fields={failed_fields} reason='validation_error'")
-            # G2F_0: Log request shape keys on validation error
-            log_request_shape_keys('PUT /api/profile/birth-data', payload)
+            # Log request shape on validation failure with diagnostics (keys only)
+            log_request_shape_keys('PUT /api/profile/birth-data', raw)
             return create_validation_error_response(ve)
         
         # Extract validated values
