@@ -13,6 +13,7 @@ import hashlib
 import secrets
 import requests
 import logging
+import re
 import time as time_module
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
@@ -2143,6 +2144,8 @@ def auth_v2_me():
                 User.is_admin,
                 User.updated_at,
                 User.profile_version,
+                UserProfile.first_name,
+                UserProfile.last_name,
                 UserProfile.display_name,
                 UserProfile.avatar_url,
                 UserProfile.bio,
@@ -2197,14 +2200,14 @@ def auth_v2_me():
         # Safely unpack query result
         try:
             (user_id, email, status, is_admin, updated_at, profile_version,
-             display_name, avatar_url, bio, profile_completion,
+             first_name, last_name, display_name, avatar_url, bio, profile_completion,
              birth_date, birth_time, timezone, latitude, longitude, birth_location) = result
         except (ValueError, TypeError) as unpack_error:
             app.logger.error(f"Result unpacking error in /me: {unpack_error}")
             # Use safe defaults
             user_id, email, status, is_admin, updated_at = result[:5]
             profile_version = getattr(result, 'profile_version', 1) if hasattr(result, 'profile_version') else 1
-            display_name = avatar_url = bio = profile_completion = None
+            first_name = last_name = display_name = avatar_url = bio = profile_completion = None
             birth_date = birth_time = timezone = latitude = longitude = birth_location = None
         
         # Session management and renewal logic using Redis session data
@@ -2245,6 +2248,9 @@ def auth_v2_me():
         user_data = {
             'id': user_id,
             'email': email,
+            'first_name': first_name or "",
+            'last_name': last_name or "",
+            'bio': bio or "",
             'status': status,
             'is_admin': is_admin,
             'updated_at': updated_at.isoformat() + 'Z' if updated_at else None,
@@ -3170,12 +3176,126 @@ def put_profile_basic():
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         
-        return response
+         return response
         
     except Exception as e:
         print(f"Put profile basic error: {e}")
         db.session.rollback()
         return jsonify({'ok': False, 'error': 'Failed to update basic profile'}), 500
+
+@app.route('/api/profile/basic-info', methods=['PUT'], strict_slashes=False)
+@require_auth
+@csrf_protect(session_store, validate_auth_session)
+def put_profile_basic_info():
+    """Update user's basic info (first_name, last_name, bio) - S8-G2"""
+    try:
+        # Validate content type
+        if not request.is_json:
+            return jsonify({'error': 'validation_error', 'details': {'content_type': ['must be application/json']}}), 415
+        
+        raw = request.get_json(silent=True) or {}
+        
+        # Extract and validate fields
+        first_name = raw.get('first_name', '').strip() if raw.get('first_name') else None
+        last_name = raw.get('last_name', '').strip() if raw.get('last_name') else None
+        bio = raw.get('bio', '').strip() if raw.get('bio') else None
+        
+        # Validation errors dict
+        errors = {}
+        
+        # Validate first_name
+        if first_name is not None:
+            if len(first_name) > 50:
+                errors['first_name'] = ['<=50 chars']
+            elif first_name and not re.match(r'^[a-zA-Z\s\'-]+$', first_name):
+                errors['first_name'] = ['letters/spaces/hyphen/apostrophe only']
+        
+        # Validate last_name
+        if last_name is not None:
+            if len(last_name) > 50:
+                errors['last_name'] = ['<=50 chars']
+            elif last_name and not re.match(r'^[a-zA-Z\s\'-]+$', last_name):
+                errors['last_name'] = ['letters/spaces/hyphen/apostrophe only']
+        
+        # Validate bio
+        if bio is not None and len(bio) > 500:
+            errors['bio'] = ['<=500 chars']
+        
+        # Return validation errors if any
+        if errors:
+            return jsonify({'error': 'validation_error', 'details': errors}), 400
+        
+        # Keys-only diagnostics
+        fields_updated = []
+        if first_name is not None:
+            fields_updated.append('first_name')
+        if last_name is not None:
+            fields_updated.append('last_name')
+        if bio is not None:
+            fields_updated.append('bio')
+        
+        app.logger.info(f"basic_info_update stage=validate fields={fields_updated}")
+        
+        # Get or create user profile
+        profile = UserProfile.query.filter_by(user_id=g.user).first()
+        if not profile:
+            profile = UserProfile(user_id=g.user)
+            db.session.add(profile)
+        
+        # Partial update - only update provided fields
+        if first_name is not None:
+            profile.first_name = first_name
+        if last_name is not None:
+            profile.last_name = last_name
+        if bio is not None:
+            profile.bio = bio
+        
+        profile.updated_at = datetime.utcnow()
+        
+        # Update user's updated_at timestamp
+        user = User.query.get(g.user)
+        if user:
+            user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        app.logger.info(f"basic_info_update stage=save fields={fields_updated}")
+        
+        # Return the same shape as /api/auth/me for consistency
+        # Get fresh data including birth_data
+        birth_data = BirthData.query.filter_by(user_id=g.user).first()
+        
+        user_data = {
+            'id': g.user,
+            'email': user.email,
+            'first_name': profile.first_name or "",
+            'last_name': profile.last_name or "",
+            'bio': profile.bio or "",
+            'status': user.status,
+            'is_admin': user.is_admin,
+            'updated_at': user.updated_at.isoformat() + 'Z' if user.updated_at else None,
+            'birth_data': {
+                'date': birth_data.birth_date.strftime('%Y-%m-%d') if birth_data and birth_data.birth_date else None,
+                'time': birth_data.birth_time.strftime('%H:%M') if birth_data and birth_data.birth_time else None,
+                'location': birth_data.birth_location if birth_data else None
+            }
+        }
+        
+        response_data = {
+            'ok': True,
+            'user': user_data
+        }
+        
+        response = make_response(jsonify(response_data), 200)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        
+        return response
+        
+    except Exception as e:
+        app.logger.error(f"Put profile basic-info error: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500
 
 @app.route('/api/profile/human-design', methods=['GET'])
 @require_auth
