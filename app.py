@@ -79,6 +79,10 @@ from api.normalize import normalize_birth_data_request
 # ============================================================================
 # APPLICATION SETUP
 # ============================================================================
+
+# API Contract Version
+SCHEMA_VERSION = "v1"
+
 app = Flask(__name__)
 
 # Configure ProxyFix for proper HTTPS detection behind Vercel/Railway proxy
@@ -2329,6 +2333,7 @@ def auth_v2_me():
         
         # Success response with complete contract
         response_data = {
+            'schema_version': SCHEMA_VERSION,
             'ok': True,
             'contract_version': 1,
             'issued_at': now.isoformat() + 'Z',

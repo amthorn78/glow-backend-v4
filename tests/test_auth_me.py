@@ -88,6 +88,17 @@ def test_auth_me_security_headers(admin_session):
     assert 'X-Content-Type-Options' in response.headers
     assert 'X-Frame-Options' in response.headers
 
+def test_auth_me_includes_schema_version(admin_session):
+    """Test that /api/auth/me includes schema_version field"""
+    response = admin_session.get('/api/auth/me')
+    
+    assert response.status_code == 200
+    data = response.get_json()
+    
+    # Assert schema_version is present and correct
+    assert 'schema_version' in data
+    assert data['schema_version'] == 'v1'
+
 def test_auth_me_unauthorized(client):
     """Test that /api/auth/me returns 401 for unauthenticated requests"""
     response = client.get('/api/auth/me')
