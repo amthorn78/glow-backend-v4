@@ -3176,7 +3176,7 @@ def put_profile_basic():
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         
-         return response
+        return response
         
     except Exception as e:
         print(f"Put profile basic error: {e}")
