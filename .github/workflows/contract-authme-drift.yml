@@ -1,0 +1,54 @@
+name: Contract Drift Detection - /auth/me
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  validate-authme-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Validate contract drift
+        env:
+          TEST_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          echo "🔍 Validating /auth/me contract against snapshot..."
+          
+          # Make validator executable
+          chmod +x tools/contracts_validate_authme.js
+          
+          # Run validation with 7s timeout and auth retry
+          node tools/contracts_validate_authme.js \
+            --snapshot contracts/schema/v1/auth_me.json \
+            --base-url https://www.glowme.io \
+            --email "$TEST_EMAIL" \
+            --password "$TEST_PASSWORD" \
+            --pointer contracts/schema/current.version \
+            --timeout 7000
+            
+      - name: Upload validation artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-validation-failure
+          path: |
+            contracts/schema/v1/auth_me.json
+            contracts/schema/current.version
+          retention-days: 7

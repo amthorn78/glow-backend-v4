@@ -1,0 +1,32 @@
+{
+  "contract_version": 1,
+  "ok": true,
+  "schema_version": "[MASKED]",
+  "user": {
+    "bio": "[MASKED]",
+    "birth_data": {
+      "date": "[MASKED]",
+      "latitude": 40.7127281,
+      "location": "[MASKED]",
+      "longitude": -74.0060152,
+      "time": "[MASKED]",
+      "timezone": "[MASKED]"
+    },
+    "email": "[MASKED]",
+    "first_name": "[MASKED]",
+    "id": 2,
+    "is_admin": true,
+    "last_name": "[MASKED]",
+    "profile": {
+      "avatar_url": null,
+      "bio": "[MASKED]",
+      "display_name": "[MASKED]",
+      "profile_completion": 100
+    },
+    "session_meta": {
+      "last_seen": "[MASKED]",
+      "renewed": false
+    },
+    "status": "[MASKED]"
+  }
+}
