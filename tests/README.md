@@ -21,8 +21,8 @@ export RUN_E2E=1
 export BASE_URL=https://www.glowme.io
 
 # Test account credentials (required)
-export SMOKE_EMAIL=admin@glow.app
-export SMOKE_PASSWORD=admin123
+export SMOKE_EMAIL=${SMOKE_EMAIL}  # Populate from secrets; never commit real values
+export SMOKE_PASSWORD=${SMOKE_PASSWORD}  # Populate from secrets; never commit real values
 
 # Optional: Custom idle timeout for session tests
 export SESSION_IDLE_MIN_FOR_TESTS=2
@@ -30,7 +30,7 @@ export SESSION_IDLE_MIN_FOR_TESTS=2
 
 ### Safety Notes
 
-1. **Dedicated Test Account:** Tests use the same account as smoke scripts (`admin@glow.app`)
+1. **Dedicated Test Account:** Tests use the same account as smoke scripts (configured via `SMOKE_EMAIL`)
 2. **Non-Destructive:** Tests avoid mutating production user data
 3. **Idempotent Payloads:** Where writes are needed, they use safe/reversible values
 4. **Skip by Default:** Without `RUN_E2E=1`, all tests are skipped
@@ -45,17 +45,17 @@ pip3 install pytest flask flask-sqlalchemy werkzeug
 
 # Run all contract tests
 RUN_E2E=1 BASE_URL=https://www.glowme.io \
-SMOKE_EMAIL=admin@glow.app SMOKE_PASSWORD=admin123 \
+SMOKE_EMAIL="${SMOKE_EMAIL}" SMOKE_PASSWORD="${SMOKE_PASSWORD}" \
 python3 -m pytest tests/ -v
 
 # Run specific test module
 RUN_E2E=1 BASE_URL=https://www.glowme.io \
-SMOKE_EMAIL=admin@glow.app SMOKE_PASSWORD=admin123 \
+SMOKE_EMAIL="${SMOKE_EMAIL}" SMOKE_PASSWORD="${SMOKE_PASSWORD}" \
 python3 -m pytest tests/test_auth_me.py -v
 
 # Run only contract shape tests (fast)
 RUN_E2E=1 BASE_URL=https://www.glowme.io \
-SMOKE_EMAIL=admin@glow.app SMOKE_PASSWORD=admin123 \
+SMOKE_EMAIL="${SMOKE_EMAIL}" SMOKE_PASSWORD="${SMOKE_PASSWORD}" \
 python3 -m pytest -q tests/test_auth_me.py -k contract
 ```
 
@@ -66,6 +66,8 @@ python3 -m pytest -q tests/test_auth_me.py -k contract
 python3 -m pytest tests/ -v
 # Expected output: SKIPPED [3] E2E contract tests disabled by default
 ```
+
+**Note:** Populate `SMOKE_EMAIL` and `SMOKE_PASSWORD` from GitHub/Vercel secrets; never commit real values to the repository.
 
 ### GitHub Actions (Future)
 
