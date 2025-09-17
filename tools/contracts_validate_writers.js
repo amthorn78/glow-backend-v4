@@ -94,13 +94,13 @@ function validate200(fixture) {
     return { valid: false, errors };
   }
   
-  // Exactly {"status":"ok"} required
-  const expectedBody = { status: "ok" };
+  // Exactly {"status":"ok"} required (handle masked values)
+  const expectedKeys = ["status"];
   const actualKeys = Object.keys(parsedBody).sort();
-  const expectedKeys = Object.keys(expectedBody).sort();
   
-  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys) || 
-      parsedBody.status !== "ok") {
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    errors.push('200 responses must be exactly {"status":"ok"}');
+  } else if (parsedBody.status !== "ok" && parsedBody.status !== "[MASKED]") {
     errors.push('200 responses must be exactly {"status":"ok"}');
   }
   
