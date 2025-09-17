@@ -29,6 +29,11 @@
       "method": "POST",
       "path": "/api/compatibility/calculate",
       "description": "Calculate compatibility"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profile/preferences",
+      "description": "Update user preferences - S8-D2a"
     }
   ],
   "version": "1.0",

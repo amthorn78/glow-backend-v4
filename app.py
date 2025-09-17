@@ -929,6 +929,17 @@ class UserSession(db.Model):
     def is_expired(self):
         return datetime.utcnow() > self.expires_at
 
+class UserPreferences(db.Model):
+    """User preferences storage with JSON/JSONB column"""
+    __tablename__ = 'user_preferences'
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    prefs = db.Column(db.JSON)  # JSONB on PostgreSQL, JSON on SQLite
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship
+    user = db.relationship('User', backref='preferences')
+
 # ============================================================================
 # RESONANCE TEN MODELS
 # ============================================================================
@@ -2298,6 +2309,15 @@ def auth_v2_me():
             idle_expires_at = now + timedelta(minutes=30)
             absolute_expires_at = now + timedelta(hours=24)
         
+        # Query user preferences - S8-D2a
+        prefs_record = UserPreferences.query.filter_by(user_id=user_id).first()
+        preferences = prefs_record.prefs if prefs_record else {}
+        
+        # Apply defaults for missing keys
+        preferences_with_defaults = {
+            'preferred_pace': preferences.get('preferred_pace', 'medium')
+        }
+        
         # Build complete user response with stable JSON shape
         user_data = {
             'id': user_id,
@@ -2322,6 +2342,7 @@ def auth_v2_me():
                 'longitude': float(longitude) if longitude is not None else None,
                 'location': birth_location
             },
+            'preferences': preferences_with_defaults,
             'session_meta': {
                 'session_id': session_id,
                 'last_seen': last_seen.isoformat() + 'Z',
@@ -3342,6 +3363,74 @@ def put_profile_basic_info():
         app.logger.error(f"Put profile basic-info error: {e}")
         db.session.rollback()
         return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500
+
+@app.route('/api/profile/preferences', methods=['PUT'])
+@require_auth
+@csrf_protect(session_store, validate_auth_session)
+def update_preferences():
+    """Update user preferences with validation - S8-D2a"""
+    try:
+        # Parse and validate JSON
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "code": "validation_error",
+                "error": "JSON payload required"
+            }), 400
+        
+        # Validate preferences
+        validation_errors = {}
+        
+        # Check for unknown keys
+        known_keys = {'preferred_pace'}
+        unknown_keys = set(data.keys()) - known_keys
+        if unknown_keys:
+            validation_errors['extra'] = list(unknown_keys)
+        
+        # Check snake_case (detect camelCase)
+        for key in data.keys():
+            if any(c.isupper() for c in key):
+                validation_errors['casing'] = f"Use snake_case, not camelCase: {key}"
+                break
+        
+        # Validate preferred_pace enum
+        if 'preferred_pace' in data:
+            if data['preferred_pace'] not in ['slow', 'medium', 'fast']:
+                validation_errors['invalid_fields'] = {'preferred_pace': 'Must be slow, medium, or fast'}
+        
+        if validation_errors:
+            return jsonify({
+                "code": "validation_error",
+                "error": "Invalid preferences data",
+                "details": validation_errors
+            }), 400
+        
+        # Update or create preferences record
+        prefs_record = UserPreferences.query.filter_by(user_id=g.user).first()
+        if not prefs_record:
+            prefs_record = UserPreferences(user_id=g.user, prefs={})
+            db.session.add(prefs_record)
+        
+        # Update preferences (merge with existing)
+        current_prefs = prefs_record.prefs or {}
+        current_prefs.update(data)
+        prefs_record.prefs = current_prefs
+        prefs_record.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # Lake-compliant success response
+        response = jsonify({"status": "ok"})
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 200
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Preferences update error: {e}")
+        return jsonify({
+            "code": "internal_error",
+            "error": "Failed to update preferences"
+        }), 500
 
 @app.route('/api/profile/human-design', methods=['GET'])
 @require_auth
