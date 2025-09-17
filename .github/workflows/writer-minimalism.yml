@@ -10,6 +10,10 @@ on:
     # Daily at 3 AM UTC (after auth/me drift check)
     - cron: '0 3 * * *'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-writer-minimalism:
     runs-on: ubuntu-latest

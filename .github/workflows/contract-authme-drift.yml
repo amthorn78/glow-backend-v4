@@ -10,6 +10,10 @@ on:
     # Daily at 2 AM UTC
     - cron: '0 2 * * *'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-authme-contract:
     runs-on: ubuntu-latest
@@ -26,8 +30,8 @@ jobs:
           
       - name: Validate contract drift
         env:
-          TEST_EMAIL: ${{ secrets.SMOKE_EMAIL }}
-          TEST_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
         run: |
           echo "🔍 Validating /auth/me contract against snapshot..."
           
@@ -38,8 +42,8 @@ jobs:
           node tools/contracts_validate_authme.js \
             --snapshot contracts/schema/v1/auth_me.json \
             --base-url https://www.glowme.io \
-            --email "$TEST_EMAIL" \
-            --password "$TEST_PASSWORD" \
+            --email "$SMOKE_EMAIL" \
+            --password "$SMOKE_PASSWORD" \
             --pointer contracts/schema/current.version \
             --timeout 7000
             

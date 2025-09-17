@@ -11,10 +11,16 @@ on:
   workflow_dispatch:
     # Allow manual triggering
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Disable legacy workflow - replaced by specific auth/me and writer minimalism guards
+    if: ${{ false }}
     
     steps:
     - name: Checkout repository
