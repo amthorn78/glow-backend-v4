@@ -2512,10 +2512,8 @@ def update_user_priorities():
         
         db.session.commit()
         
-        return jsonify({
-            'message': 'Priorities updated successfully',
-            'priorities': priorities.to_dict()
-        })
+        # Return lake-compliant minimal response
+        return jsonify({"status": "ok"})
     
     except Exception as e:
         db.session.rollback()
@@ -2649,10 +2647,8 @@ def calculate_compatibility():
         # Store result
         store_compatibility_result(g.user, target_user_id, compatibility)
         
-        return jsonify({
-            'compatibility': compatibility,
-            'target_user': target_user.to_dict()
-        })
+        # Return lake-compliant minimal response
+        return jsonify({"status": "ok"})
     
     except Exception as e:
         print(f"Calculate compatibility error: {e}")
