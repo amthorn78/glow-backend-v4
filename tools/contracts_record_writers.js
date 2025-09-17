@@ -116,6 +116,20 @@ function maskSensitiveObject(obj) {
 }
 
 /**
+ * Check if error is transient and should be retried
+ */
+function isTransientError(error, statusCode) {
+  // Retry on 502/503/504 (transient server errors)
+  if (statusCode === 502 || statusCode === 503 || statusCode === 504) {
+    return true;
+  }
+  
+  // Retry on network/socket errors
+  const transientCodes = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'];
+  return transientCodes.some(code => error.message.includes(code));
+}
+
+/**
  * Perform login and return cookies
  */
 async function login(baseUrl, email, password) {
@@ -137,13 +151,51 @@ async function login(baseUrl, email, password) {
   try {
     const response = await makeRequest(options, postData);
     
-    if (response.statusCode !== 200) {
-      throw new Error(`Login failed with status ${response.statusCode}`);
+    if (response.statusCode === 200) {
+      const cookies = response.headers['set-cookie'] || [];
+      return cookies.join('; ');
     }
     
-    const cookies = response.headers['set-cookie'] || [];
-    return cookies.join('; ');
+    // Check if we should retry on transient errors
+    if (isTransientError(null, response.statusCode)) {
+      console.log(`auth_retry=1 status=${response.statusCode}`);
+      
+      // Wait 200-300ms with jitter
+      const jitter = 200 + Math.random() * 100;
+      await new Promise(resolve => setTimeout(resolve, jitter));
+      
+      const retryResponse = await makeRequest(options, postData);
+      if (retryResponse.statusCode !== 200) {
+        throw new Error(`Login failed with status ${retryResponse.statusCode} (after retry)`);
+      }
+      
+      const cookies = retryResponse.headers['set-cookie'] || [];
+      return cookies.join('; ');
+    }
+    
+    throw new Error(`Login failed with status ${response.statusCode}`);
   } catch (error) {
+    // Check if we should retry on network errors
+    if (isTransientError(error, null)) {
+      console.log(`auth_retry=1 error=${error.code || 'network'}`);
+      
+      // Wait 200-300ms with jitter
+      const jitter = 200 + Math.random() * 100;
+      await new Promise(resolve => setTimeout(resolve, jitter));
+      
+      try {
+        const retryResponse = await makeRequest(options, postData);
+        if (retryResponse.statusCode !== 200) {
+          throw new Error(`Login failed with status ${retryResponse.statusCode} (after retry)`);
+        }
+        
+        const cookies = retryResponse.headers['set-cookie'] || [];
+        return cookies.join('; ');
+      } catch (retryError) {
+        throw new Error(`Login request failed: ${retryError.message} (after retry)`);
+      }
+    }
+    
     throw new Error(`Login request failed: ${error.message}`);
   }
 }
