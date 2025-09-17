@@ -1,0 +1,31 @@
+{
+  "endpoint": "PUT /api/profile/basic-info",
+  "status_code": 403,
+  "headers": {
+    "access-control-allow-headers": "Content-Type, X-CSRF-Token, Authorization",
+    "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "cache-control": "no-store",
+    "content-length": "64",
+    "content-security-policy-report-only": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; connect-src 'self'",
+    "content-type": "application/json; charset=utf-8",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-site",
+    "date": "Wed, 17 Sep 2025 20:29:17 GMT",
+    "permissions-policy": "geolocation=(), camera=(), microphone=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()",
+    "pragma": "no-cache",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "server": "Vercel",
+    "set-cookie": "flask_session=bdb23344-0eab-4f37-856c-a89b417c1038.H2f8GktoikS3i40mGAsMCSJDrUo; Expires=Wed, 17 Sep 2025 20:59:17 GMT; Secure; HttpOnly; Path=/; SameSite=Lax",
+    "strict-transport-security": "max-age=15552000; includeSubDomains",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-railway-edge": "railway/us-east4-eqdc4a",
+    "x-railway-request-id": "uDo7ZT4BTxSrMmF0PvyhXg",
+    "x-vercel-cache": "MISS",
+    "x-vercel-id": "iad1::vsczj-1758140957607-00562aae7d4c"
+  },
+  "body": "{\"code\":\"[MASKED]\",\"error\":\"[MASKED]\",\"ok\":false}",
+  "recorded_at": "[TIMESTAMP_REDACTED]",
+  "masked": true
+}

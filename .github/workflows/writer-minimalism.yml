@@ -1,0 +1,82 @@
+name: Writer Minimalism Guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Daily at 3 AM UTC (after auth/me drift check)
+    - cron: '0 3 * * *'
+
+jobs:
+  validate-writer-minimalism:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Skip on forks where secrets aren't available
+    if: github.event.pull_request.head.repo.fork == false || github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Create fixtures directory
+        run: mkdir -p tests/fixtures/writers
+        
+      - name: Record writer endpoints
+        env:
+          WRITER_CHECK_BASE_URL: https://www.glowme.io
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          echo "🔍 Recording writer endpoints..."
+          
+          # Check required environment variables
+          if [ -z "$WRITER_CHECK_BASE_URL" ] || [ -z "$SMOKE_EMAIL" ] || [ -z "$SMOKE_PASSWORD" ]; then
+            echo "❌ Missing required environment variables"
+            echo "Required: WRITER_CHECK_BASE_URL, SMOKE_EMAIL, SMOKE_PASSWORD"
+            exit 3
+          fi
+          
+          # Make recorder executable
+          chmod +x tools/contracts_record_writers.js
+          
+          # Run recorder with 7s timeout per call
+          node tools/contracts_record_writers.js \
+            --base-url "$WRITER_CHECK_BASE_URL" \
+            --email "$SMOKE_EMAIL" \
+            --password "$SMOKE_PASSWORD"
+            
+      - name: Validate writer minimalism
+        run: |
+          echo "🔍 Validating writer minimalism rules..."
+          
+          # Make validator executable
+          chmod +x tools/contracts_validate_writers.js
+          
+          # Run validator
+          node tools/contracts_validate_writers.js
+          
+      - name: Upload fixtures on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: writer-fixtures-failure
+          path: |
+            tests/fixtures/writers/*.json
+          retention-days: 7
+          
+      - name: Upload fixtures on success (for audit)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: writer-fixtures-success
+          path: |
+            tests/fixtures/writers/*.json
+          retention-days: 3

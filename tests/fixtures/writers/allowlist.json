@@ -1,0 +1,36 @@
+{
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "description": "User authentication"
+    },
+    {
+      "method": "POST", 
+      "path": "/api/auth/logout",
+      "description": "User logout"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profile/basic-info", 
+      "description": "Update basic profile information"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profile/birth-data",
+      "description": "Update birth data"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/priorities",
+      "description": "Update user priorities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/compatibility/calculate",
+      "description": "Calculate compatibility"
+    }
+  ],
+  "version": "1.0",
+  "last_updated": "2025-09-17"
+}
