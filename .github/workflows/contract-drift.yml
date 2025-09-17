@@ -1,0 +1,35 @@
+name: Contract Drift Detection
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install jsonschema requests
+    
+    - name: Validate contracts
+      env:
+        BASE_URL: https://www.glowme.io
+        SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+        SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+      run: |
+        python3 scripts/validate_contracts.py
+      timeout-minutes: 1
+
