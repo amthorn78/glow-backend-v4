@@ -17,6 +17,9 @@
     "id": 2,
     "is_admin": true,
     "last_name": "[MASKED]",
+    "preferences": {
+      "preferred_pace": "[MASKED]"
+    },
     "profile": {
       "avatar_url": null,
       "bio": "[MASKED]",
