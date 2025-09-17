@@ -3330,34 +3330,10 @@ def put_profile_basic_info():
         
         app.logger.info(f"basic_info_update stage=save fields={fields_updated}")
         
-        # Return the same shape as /api/auth/me for consistency
-        # Get fresh data including birth_data
-        birth_data = BirthData.query.filter_by(user_id=g.user).first()
-        
-        user_data = {
-            'id': g.user,
-            'email': user.email,
-            'first_name': profile.first_name or "",
-            'last_name': profile.last_name or "",
-            'bio': profile.bio or "",
-            'status': user.status,
-            'is_admin': user.is_admin,
-            'updated_at': user.updated_at.isoformat() + 'Z' if user.updated_at else None,
-            'birth_data': {
-                'date': birth_data.birth_date.strftime('%Y-%m-%d') if birth_data and birth_data.birth_date else None,
-                'time': birth_data.birth_time.strftime('%H:%M') if birth_data and birth_data.birth_time else None,
-                'location': birth_data.birth_location if birth_data else None
-            }
-        }
-        
-        response_data = {
-            'ok': True,
-            'user': user_data
-        }
-        
-        response = make_response(jsonify(response_data), 200)
+        # SW-G2: Return minimal success response - no resource body to prevent stale data injection
+        app.logger.info(f"basic_info_update stage=success writer_minimal=true user_id={g.user}")
+        response = make_response('', 204)  # 204 No Content
         response.headers['Cache-Control'] = 'no-store'
-        response.headers['Content-Type'] = 'application/json; charset=utf-8'
         
         return response
         
