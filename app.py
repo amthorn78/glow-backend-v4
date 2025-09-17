@@ -278,6 +278,17 @@ def add_security_headers(resp):
         resp.headers['Cross-Origin-Resource-Policy'] = 'same-site'
     return resp
 
+@app.after_request
+def handle_session_renewal(resp):
+    """Handle session cookie renewal if flagged during request"""
+    if hasattr(g, 'session_needs_refresh') and g.session_needs_refresh:
+        session_id = getattr(g, 'session_id', None)
+        if session_id:
+            # Reissue session cookie with existing security flags
+            set_session_cookie(resp, session_id)
+            app.logger.info(f"Session cookie renewed in response: {session_id}")
+    return resp
+
 # OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
 @app.route("/api/<path:any_path>", methods=["OPTIONS"])
 def api_preflight(any_path):
@@ -1246,7 +1257,12 @@ def require_auth(f):
             if error_code == "AUTH_REQUIRED":
                 return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
             else:
-                return jsonify({'error': 'Session expired', 'code': 'SESSION_EXPIRED'}), 401
+                # SESSION_EXPIRED - return typed JSON as per CRD
+                return jsonify({
+                    'ok': False, 
+                    'error': 'session_expired', 
+                    'code': 'SESSION_EXPIRED'
+                }), 401
         
         # Add user to Flask g context for access in route handlers
         g.user = user
@@ -1264,7 +1280,12 @@ def require_admin(f):
             if error_code == "AUTH_REQUIRED":
                 return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
             else:
-                return jsonify({'error': 'Session expired', 'code': 'SESSION_EXPIRED'}), 401
+                # SESSION_EXPIRED - return typed JSON as per CRD
+                return jsonify({
+                    'ok': False, 
+                    'error': 'session_expired', 
+                    'code': 'SESSION_EXPIRED'
+                }), 401
         
         # Check if user is admin
         if not user.is_admin:
@@ -1872,19 +1893,51 @@ def validate_auth_session():
         if not session_id:
             return None, "AUTH_REQUIRED"
         
+        # Check if session renewal is enabled
+        renewal_enabled = os.environ.get('SESSION_RENEWAL_ENABLED', '1') == '1'
+        idle_minutes = int(os.environ.get('SESSION_IDLE_MIN', '30'))
+        
+        if not renewal_enabled:
+            # Legacy behavior - just get session without renewal logic
+            session_data = session_store.get_session(session_id)
+            if not session_data:
+                session.clear()
+                return None, "SESSION_EXPIRED"
+            return session_data['user_id'], None
+        
         # Get session from store
         session_data = session_store.get_session(session_id)
         if not session_data:
             session.clear()
             return None, "SESSION_EXPIRED"
         
-        # Touch session (updates last_seen and checks renewal)
-        touch_result = session_store.touch_session(session_id)
+        # Check idle expiry with sliding renewal logic
+        now = datetime.utcnow()
+        last_seen_str = session_data.get('last_seen', session_data.get('created_at'))
+        last_seen = datetime.fromisoformat(last_seen_str.replace('Z', ''))
         
-        # Update Flask session if renewed
-        if touch_result['renewed']:
-            session['last_seen_at'] = datetime.utcnow().isoformat()
-            app.logger.info(f"Session renewed for user {session_data['user_id']}: {session_id}")
+        idle_seconds = (now - last_seen).total_seconds()
+        idle_limit_seconds = idle_minutes * 60
+        renewal_threshold_seconds = idle_limit_seconds / 2  # Renew at half-life (~15 min)
+        
+        # Expire if idle too long
+        if idle_seconds >= idle_limit_seconds:
+            session_store.destroy_session(session_id)
+            session.clear()
+            app.logger.info(f"Session expired (idle {idle_seconds:.0f}s >= {idle_limit_seconds}s): {session_id}")
+            return None, "SESSION_EXPIRED"
+        
+        # Update last_seen for all requests
+        session_data['last_seen'] = now.isoformat() + 'Z'
+        session_store.update_session(session_id, session_data)
+        
+        # Check if rolling refresh needed (reissue cookie)
+        needs_refresh = idle_seconds >= renewal_threshold_seconds
+        if needs_refresh:
+            # Set flag for cookie reissue in response
+            g.session_needs_refresh = True
+            g.session_id = session_id
+            app.logger.info(f"Session renewal triggered (idle {idle_seconds:.0f}s >= {renewal_threshold_seconds:.0f}s): {session_id}")
         
         return session_data['user_id'], None
         
