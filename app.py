@@ -2369,30 +2369,50 @@ def auth_v2_me():
 @app.route('/api/auth/logout', methods=['POST'])
 @csrf_protect(session_store, validate_auth_session)
 def auth_v2_logout():
-    """Auth v2 Logout - Session invalidation"""
+    """Auth v2 Logout - Session invalidation with standardized JSON response"""
     try:
         user_id = session.get('user_id')
+        has_active_session = user_id is not None
         
-        # Clear session regardless of validity
+        # Clear session regardless of validity (idempotent)
         clear_auth_session()
         
-        # Create response and clear cookies
-        response_data = {'ok': True}
+        # Create standardized response based on session state
+        if has_active_session:
+            response_data = {
+                'status': 'ok',
+                'code': 'LOGOUT', 
+                'message': 'Logged out',
+                'idempotent': True,
+                'ok': True
+            }
+            app.logger.info(f"Logout successful for user {user_id}")
+        else:
+            response_data = {
+                'status': 'ok',
+                'code': 'LOGOUT',
+                'message': 'No active session', 
+                'idempotent': True,
+                'ok': True
+            }
+            app.logger.info("Logout called with no active session")
+        
         response = make_response(jsonify(response_data))
         
         # Clear both session and CSRF cookies
         _clear_cookie(response, 'glow_session')
         clear_csrf_on_logout(response)
         
-        app.logger.info(f"Logout successful for user {user_id or 'unknown'}")
         return response, 200
     
     except Exception as e:
         app.logger.error(f"Logout error: {e}")
         return jsonify({
-            'ok': False,
-            'error': 'Logout failed',
-            'code': 'INTERNAL_ERROR'
+            'status': 'error',
+            'code': 'INTERNAL_ERROR',
+            'message': 'Logout failed',
+            'idempotent': False,
+            'ok': False
         }), 500
 
 
