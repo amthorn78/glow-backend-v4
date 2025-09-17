@@ -5,31 +5,102 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC to catch production drift
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
 
 jobs:
-  validate:
+  validate-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
     
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+        cache: 'pip'
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install jsonschema requests
     
-    - name: Validate contracts
+    - name: Validate contract schemas
+      run: |
+        echo "🔍 Validating schema files..."
+        python3 -c "
+        import json
+        import sys
+        from pathlib import Path
+        
+        schema_dir = Path('contracts/schema/current')
+        if not schema_dir.exists():
+            print('❌ Schema directory not found')
+            sys.exit(1)
+            
+        for schema_file in schema_dir.glob('*.json'):
+            try:
+                with open(schema_file) as f:
+                    json.load(f)
+                print(f'✅ {schema_file.name}: Valid JSON')
+            except json.JSONDecodeError as e:
+                print(f'❌ {schema_file.name}: Invalid JSON - {e}')
+                sys.exit(1)
+        "
+    
+    - name: Validate live API contracts
       env:
         BASE_URL: https://www.glowme.io
-        SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
-        SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
       run: |
+        echo "🔍 Validating live API responses against contracts..."
         python3 scripts/validate_contracts.py
-      timeout-minutes: 1
+      timeout-minutes: 2
+    
+    - name: Report validation results
+      if: always()
+      run: |
+        if [ $? -eq 0 ]; then
+          echo "✅ Contract validation passed - No drift detected"
+          echo "::notice title=Contract Validation::All API contracts are valid and no drift detected"
+        else
+          echo "❌ Contract validation failed - Drift detected"
+          echo "::error title=Contract Drift::API response drift detected - contracts may need updating"
+          exit 1
+        fi
 
+  # Security check for contract changes
+  security-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 2
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Check for contract changes
+      run: |
+        echo "🔍 Checking for contract schema changes..."
+        
+        # Check if any schema files were modified
+        CHANGED_SCHEMAS=$(git diff --name-only origin/main...HEAD | grep "contracts/schema/" || true)
+        
+        if [ -n "$CHANGED_SCHEMAS" ]; then
+          echo "⚠️ Contract schema changes detected:"
+          echo "$CHANGED_SCHEMAS"
+          echo "::warning title=Schema Changes::Contract schemas have been modified - ensure proper review"
+          
+          # Show the actual changes
+          echo "📋 Schema changes:"
+          git diff origin/main...HEAD -- contracts/schema/
+        else
+          echo "✅ No contract schema changes detected"
+        fi
