@@ -378,7 +378,6 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(20), default='pending')  # pending, approved, suspended
     is_admin = db.Column(db.Boolean, default=False, nullable=False)  # Admin privilege flag
-    profile_version = db.Column(db.Integer, nullable=False, default=1)  # Client hint/cache key
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -2196,7 +2195,6 @@ def auth_v2_me():
                 User.status,
                 User.is_admin,
                 User.updated_at,
-                User.profile_version,
                 UserProfile.first_name,
                 UserProfile.last_name,
                 UserProfile.display_name,
@@ -2252,14 +2250,13 @@ def auth_v2_me():
         
         # Safely unpack query result
         try:
-            (user_id, email, status, is_admin, updated_at, profile_version,
+            (user_id, email, status, is_admin, updated_at,
              first_name, last_name, display_name, avatar_url, bio, profile_completion,
              birth_date, birth_time, timezone, latitude, longitude, birth_location) = result
         except (ValueError, TypeError) as unpack_error:
             app.logger.error(f"Result unpacking error in /me: {unpack_error}")
             # Use safe defaults
             user_id, email, status, is_admin, updated_at = result[:5]
-            profile_version = getattr(result, 'profile_version', 1) if hasattr(result, 'profile_version') else 1
             first_name = last_name = display_name = avatar_url = bio = profile_completion = None
             birth_date = birth_time = timezone = latitude = longitude = birth_location = None
         
@@ -2321,7 +2318,6 @@ def auth_v2_me():
                 'longitude': float(longitude) if longitude is not None else None,
                 'location': birth_location
             },
-            'profile_version': profile_version or 1,
             'session_meta': {
                 'session_id': session_id,
                 'last_seen': last_seen.isoformat() + 'Z',
@@ -2350,7 +2346,7 @@ def auth_v2_me():
         
         # Log performance and success
         latency_ms = int((time_module.time() - start_time) * 1000)
-        app.logger.info(f"Me check successful for user {user_id}, renewed={session_renewed}, latency={latency_ms}ms, profile_version={profile_version}")
+        app.logger.info(f"Me check successful for user {user_id}, renewed={session_renewed}, latency={latency_ms}ms")
         
         return response, 200
     
