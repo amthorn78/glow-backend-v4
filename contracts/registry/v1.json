@@ -1,19 +1,9 @@
 {
   "registry_version": "v1",
-
-
-  "schema": {
-  "registry_version": "v1",
-    "type": "object",
-    "properties": {
-  "registry_version": "v1",
-      "preferred_pace": {
-  "registry_version": "v1",
-        "type": "string",
-        "enum": ["slow", "moderate", "fast"],
-        "description": "The user's preferred pace for getting to know someone."
-      }
-    },
-    "additionalProperties": false
+  "fields": {
+    "preferred_pace": {
+      "type": "enum",
+      "values": ["slow", "moderate", "fast"]
+    }
   }
 }
