@@ -2311,7 +2311,7 @@ def auth_v2_me():
         
         # Query user preferences - S8-D2a
         prefs_record = UserPreferences.query.filter_by(user_id=user_id).first()
-        preferences = prefs_record.prefs if prefs_record else {}
+        preferences = prefs_record.prefs if prefs_record and prefs_record.prefs else {}
         
         # Apply defaults for missing keys
         preferences_with_defaults = {
@@ -3362,61 +3362,50 @@ def put_profile_basic_info():
     except Exception as e:
         app.logger.error(f"Put profile basic-info error: {e}")
         db.session.rollback()
-        return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500
-
-@app.route('/api/profile/preferences', methods=['PUT'])
+        return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500@app.route("/api/profile/preferences", methods=["PUT"])
 @require_auth
 @csrf_protect(session_store, validate_auth_session)
 def update_preferences():
-    """Update user preferences with validation - S8-D2a"""
+    """Update user preferences, persist to DB, and return minimal response."""
     try:
-        # Parse and validate JSON
         data = request.get_json()
         if not data:
+            return jsonify({"error": "validation_error", "message": "JSON payload required"}), 400
+
+        # --- Validation ---
+        allowed_pace = ["slow", "medium", "fast"]
+        preferred_pace = data.get("preferred_pace")
+
+        if "preferred_pace" not in data or preferred_pace not in allowed_pace:
             return jsonify({
                 "error": "validation_error",
-                "message": "JSON payload required"
+                "details": {"preferred_pace": f"must be one of {allowed_pace}"}
             }), 400
-        
-        # Validate preferences
-        validation_errors = {}
-        
-        # Check for unknown keys (sorted for deterministic output)
-        known_keys = {'preferred_pace'}
-        unknown_keys = set(data.keys()) - known_keys
-        if unknown_keys:
-            validation_errors['extra'] = sorted(list(unknown_keys))
-        
-        # Check snake_case with specific hints
-        camel_to_snake = {'preferredPace': 'preferred_pace'}
-        for key in data.keys():
-            if key in camel_to_snake:
-                validation_errors['case'] = f"Use snake_case: {camel_to_snake[key]} (not {key})"
-                break
-            elif any(c.isupper() for c in key):
-                validation_errors['case'] = f"Use snake_case format for: {key}"
-                break
-        
-        # Validate preferred_pace enum with allowed values
-        if 'preferred_pace' in data:
-            value = data['preferred_pace']
-            allowed = ['slow', 'medium', 'fast']
-            if value not in allowed:
-                validation_errors['enum'] = {
-                    'preferred_pace': {
-                        'value': value,
-                        'allowed': allowed
-                    }
-                }
-        
-        if validation_errors:
-            return jsonify({
-                "error": "validation_error",
-                "details": validation_errors
-            }), 400
-        
-        # Update or create preferences record
-        prefs_record = UserPreferences.query.filter_by(user_id=g.user).first()
+
+        # --- Persistence ---
+        user_prefs = UserPreferences.query.filter_by(user_id=g.user).first()
+        if not user_prefs:
+            user_prefs = UserPreferences(user_id=g.user)
+            db.session.add(user_prefs)
+
+        if not user_prefs.prefs:
+            user_prefs.prefs = {}
+
+        user_prefs.prefs["preferred_pace"] = preferred_pace
+        # Mark as modified for JSONB to detect changes
+        db.session.flag_modified(user_prefs, "prefs")
+
+        db.session.commit()
+
+        # --- Response (Lake-Compliant) ---
+        response = make_response(jsonify({"status": "ok"}), 200)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Preferences update error: {e}")
+        return jsonify({"error": "server_error"}), 500serPreferences.query.filter_by(user_id=g.user).first()
         if not prefs_record:
             prefs_record = UserPreferences(user_id=g.user, prefs={})
             db.session.add(prefs_record)
