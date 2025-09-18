@@ -1,0 +1,48 @@
+name: Registry Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout HEAD
+        uses: actions/checkout@v3
+        with:
+          path: head
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r head/requirements-dev.txt
+
+      - name: Validate current registry on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          chmod +x head/scripts/validate_registry.py
+          head/scripts/validate_registry.py
+
+      - name: Checkout BASE
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Compare registries on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          chmod +x head/scripts/validate_registry.py
+          # First, validate the PR's registry file for internal consistency
+          head/scripts/validate_registry.py
+          # Then, compare the PR's registry with the base branch's registry
+          head/scripts/validate_registry.py base/contracts/registry/v1.json head/contracts/registry/v1.json
