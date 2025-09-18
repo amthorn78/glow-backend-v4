@@ -3,7 +3,6 @@ import json
 import os
 import re
 import sys
-from jsonschema import validate, ValidationError
 
 # Constants
 REGISTRY_PATH = os.path.join(
@@ -13,114 +12,81 @@ REGISTRY_PATH = os.path.join(
     'registry',
     'v1.json'
 )
-SNAKE_CASE_PATTERN = re.compile(r'^[a-z0-9_]+$')
+SNAKE_CASE_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
+ALLOWED_SPEC_KEYS = {'type', 'values'}
 
-def get_all_keys(data, parent_key=''):
-    """Recursively get all keys from a nested dictionary."""
-    keys = set()
-    for k, v in data.items():
-        new_key = f"{parent_key}.{k}" if parent_key else k
-        keys.add(new_key)
-        if isinstance(v, dict):
-            keys.update(get_all_keys(v, new_key))
-    return keys
-
-def validate_snake_case(data):
-    """Validate that all keys in the dictionary are snake_case."""
+def validate_registry(registry):
     errors = []
-    properties = data.get('properties', {})
-    for key in get_all_keys(properties):
-        for key_segment in key.split('.'):
-             if not SNAKE_CASE_PATTERN.match(key_segment):
-                errors.append(f"Validation Error: Key segment '{key_segment}' in '{key}' is not snake_case.")
+
+    # Rule: registry_version === "v1"
+    if registry.get('registry_version') != 'v1':
+        errors.append('ERROR: registry_version must be "v1"')
+
+    # Rule: fields exists and is an object/dict
+    fields = registry.get('fields')
+    if not isinstance(fields, dict):
+        errors.append('ERROR: "fields" key must be an object')
+        return errors # Stop if fields is not a dict
+
+    for field_name, spec in fields.items():
+        # Rule: field name must be snake_case
+        if not SNAKE_CASE_PATTERN.match(field_name):
+            errors.append(f"ERROR: field name not snake_case: {field_name}")
+
+        # Rule: spec.type is valid
+        spec_type = spec.get('type')
+        if spec_type not in ["enum", "string", "number", "boolean"]:
+            errors.append(f"ERROR: invalid type '{spec_type}' in fields.{field_name}")
+
+        # Rule: enum spec validation
+        if spec_type == "enum":
+            values = spec.get('values')
+            if not isinstance(values, list) or not values:
+                errors.append(f"ERROR: enum.values empty in fields.{field_name}")
+            else:
+                for value in values:
+                    if not SNAKE_CASE_PATTERN.match(value):
+                        errors.append(f"ERROR: enum value not snake_case: '{value}' in fields.{field_name}")
+
+        # Rule: No unknown keys in spec
+        for key in spec.keys():
+            if key not in ALLOWED_SPEC_KEYS:
+                errors.append(f"ERROR: unknown key '{key}' in fields.{field_name}")
+
     return errors
 
-def compare_registries(base_registry, head_registry):
-    """Compare two registry files and return a key-path-only diff."""
-    base_keys = get_all_keys(base_registry.get('schema', {}).get('properties', {}))
-    head_keys = get_all_keys(head_registry.get('schema', {}).get('properties', {}))
-
-    added_keys = head_keys - base_keys
-    removed_keys = base_keys - head_keys
-
-    diffs = []
-    if added_keys:
-        for key in sorted(list(added_keys)):
-            diffs.append(f"+ {key}")
-    if removed_keys:
-        for key in sorted(list(removed_keys)):
-            diffs.append(f"- {key}")
-
-    return diffs
-
-def main(registry_path=REGISTRY_PATH):
-    """Main validation function."""
+def main(file_path=None):
+    registry_path = file_path or REGISTRY_PATH
     try:
         with open(registry_path, 'r') as f:
             registry = json.load(f)
     except FileNotFoundError:
-        print(f"Error: Registry file not found at {registry_path}", file=sys.stderr)
-        return 1
+        print(f"File not found: {registry_path}", file=sys.stderr)
+        return 2
     except json.JSONDecodeError:
-        print(f"Error: Invalid JSON in {registry_path}", file=sys.stderr)
-        return 1
+        print(f"Invalid JSON in file: {registry_path}", file=sys.stderr)
+        return 2
 
-    schema = registry.get('schema')
-    if not schema:
-        print("Error: Registry does not contain a 'schema' key.", file=sys.stderr)
-        return 1
+    errors = validate_registry(registry)
 
-    # 1. Validate snake_case keys
-    snake_case_errors = validate_snake_case(schema)
-    if snake_case_errors:
-        for error in snake_case_errors:
+    if errors:
+        for error in errors:
             print(error, file=sys.stderr)
         return 1
-
-    # 2. Validate against a sample payload to enforce schema rules
-    try:
-        validate(instance={"preferred_pace": "slow"}, schema=schema)
-    except ValidationError as e:
-        print(f"Schema validation failed for a valid instance: {e.message}", file=sys.stderr)
-        return 1
-
-    try:
-        validate(instance={"unknown_field": "test"}, schema=schema)
-        print("Schema Error: 'additionalProperties' is not false. Unknown keys are allowed.", file=sys.stderr)
-        return 1
-    except ValidationError as e:
-        if "'unknown_field' was unexpected" not in e.message:
-             print(f"Schema validation failed unexpectedly for an invalid instance: {e.message}", file=sys.stderr)
-             return 1
 
     print("Registry validation successful.")
     return 0
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3:
-        base_file_path = sys.argv[1]
-        head_file_path = sys.argv[2]
+    # Support --file optional arg
+    if '--file' in sys.argv:
         try:
-            with open(base_file_path, 'r') as f:
-                base_registry = json.load(f)
-            with open(head_file_path, 'r') as f:
-                head_registry = json.load(f)
-
-            diff = compare_registries(base_registry, head_registry)
-            if diff:
-                print("Registry key-path diff detected:", file=sys.stderr)
-                for line in diff:
-                    print(line, file=sys.stderr)
-                sys.exit(1)
-            else:
-                print("No registry key changes detected.")
-                sys.exit(0)
-
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error comparing registries: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif len(sys.argv) == 2:
-        sys.exit(main(sys.argv[1]))
+            file_index = sys.argv.index('--file')
+            file_path = sys.argv[file_index + 1]
+            sys.exit(main(file_path=file_path))
+        except (IndexError, FileNotFoundError):
+            print("Error: --file argument requires a valid file path.", file=sys.stderr)
+            sys.exit(2)
     else:
         sys.exit(main())
 
