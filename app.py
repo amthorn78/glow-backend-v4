@@ -3405,7 +3405,7 @@ def update_preferences():
     except Exception as e:
         db.session.rollback()
         app.logger.error(f"Preferences update error: {e}")
-        return jsonify({"error": "server_error"}), 500serPreferences.query.filter_by(user_id=g.user).first()
+        return jsonify({"error": "server_error"}), 500
         if not prefs_record:
             prefs_record = UserPreferences(user_id=g.user, prefs={})
             db.session.add(prefs_record)
