@@ -75,6 +75,7 @@ from session_revocation import (
     create_revocation_endpoints, track_session_on_login, untrack_session_on_logout
 )
 from api.normalize import normalize_birth_data_request
+from audit.writer_contract_audit import audit_writer_response, create_writer_audit_endpoint
 
 # ============================================================================
 # APPLICATION SETUP
@@ -292,6 +293,9 @@ def handle_session_renewal(resp):
             set_session_cookie(resp, session_id)
             app.logger.info(f"Session cookie renewed in response: {session_id}")
     return resp
+
+# Register writer contract audit middleware (PROT-4)
+app.after_request(audit_writer_response)
 
 # OPTIONS catch-all for /api/* (bypasses auth; Railway edge always gets a 204)
 @app.route("/api/<path:any_path>", methods=["OPTIONS"])
@@ -4162,6 +4166,12 @@ create_csrf_endpoints(app, session_store, validate_auth_session)
 # ============================================================================
 # Create session revocation endpoints after all models and functions are defined
 create_revocation_endpoints(app, session_store, validate_auth_session, csrf_protect)
+
+# ============================================================================
+# WRITER CONTRACT AUDIT ENDPOINT (PROT-4)
+# ============================================================================
+# Create writer contract audit endpoint (env-gated)
+create_writer_audit_endpoint(app)
 
 
 if __name__ == '__main__':
