@@ -4,7 +4,8 @@
   "description": "GLOW Intelligence Backend API",
   "scripts": {
     "contracts:record-writers": "node tools/contracts_record_writers.js --base-url ${WRITER_CHECK_BASE_URL:-https://www.glowme.io} --email ${SMOKE_EMAIL} --password ${SMOKE_PASSWORD}",
-    "contracts:validate-writers": "node tools/contracts_validate_writers.js"
+    "contracts:validate-writers": "node tools/contracts_validate_writers.js",
+    "writers:violation:smoke": "node tools/writers_violation_smoke.js"
   },
   "engines": {
     "node": ">=18.0.0"
