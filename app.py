@@ -4081,6 +4081,77 @@ def initialize_admin():
 create_session_diagnostics_endpoint(app, session_store, validate_auth_session)
 
 # ============================================================================
+# BOOT SELF-CHECKS (PROT-2)
+# ============================================================================
+def run_boot_self_checks():
+    """Environment-gated boot self-checks to catch route/env/DB drift"""
+    
+    # Route Audit (ENABLE_ROUTE_AUDIT=1)
+    if os.environ.get('ENABLE_ROUTE_AUDIT') == '1':
+        app.logger.info("BOOT: Running route audit...")
+        
+        # Check critical routes and their methods
+        critical_routes = {
+            '/api/profile/preferences': ['PUT'],
+            '/api/auth/me': ['GET']
+        }
+        
+        for rule in app.url_map.iter_rules():
+            endpoint_path = rule.rule
+            if endpoint_path in critical_routes:
+                required_methods = critical_routes[endpoint_path]
+                allowed_methods = list(rule.methods - {'HEAD', 'OPTIONS'})
+                
+                app.logger.info(f"ROUTE_AUDIT: {endpoint_path} → methods={allowed_methods}")
+                
+                for required_method in required_methods:
+                    if required_method not in allowed_methods:
+                        app.logger.error(f"ROUTE_AUDIT_FAIL: {required_method} not found on {endpoint_path}")
+                        exit(1)
+        
+        app.logger.info("ROUTE_AUDIT: PASS")
+    
+    # Sanity Probe (ENABLE_SANITY_PROBE=1)
+    if os.environ.get('ENABLE_SANITY_PROBE') == '1':
+        is_strict = os.environ.get('SANITY_STRICT') == '1'
+        app.logger.info(f"BOOT: Running sanity probe (strict={is_strict})...")
+        
+        try:
+            # Test environment variable parsing
+            absolute_ttl = os.environ.get('ABSOLUTE_TTL_HOURS', '24')
+            try:
+                int(absolute_ttl)
+            except ValueError:
+                raise Exception(f"ABSOLUTE_TTL_HOURS must be integer, got: {absolute_ttl}")
+            
+            # Test database connectivity
+            with app.app_context():
+                db.session.execute(text('SELECT 1'))
+                
+                # Check user_preferences table exists and has jsonb prefs column
+                if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'].lower():
+                    result = db.session.execute(text("""
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'user_preferences' AND column_name = 'prefs'
+                    """))
+                    prefs_column = result.fetchone()
+                    if not prefs_column:
+                        raise Exception("user_preferences.prefs column not found")
+                    if 'json' not in prefs_column[1].lower():
+                        raise Exception(f"user_preferences.prefs should be JSON/JSONB, got: {prefs_column[1]}")
+            
+            app.logger.info("SANITY_PROBE: PASS")
+            
+        except Exception as e:
+            app.logger.error(f"SANITY_PROBE_FAIL: {e}")
+            if is_strict:
+                exit(1)
+
+# Run boot self-checks after all initialization is complete
+run_boot_self_checks()
+
+# ============================================================================
 # CSRF PROTECTION ENDPOINTS (T3.2)
 # ============================================================================
 # Create CSRF endpoints after all models and functions are defined
