@@ -3374,34 +3374,44 @@ def update_preferences():
         data = request.get_json()
         if not data:
             return jsonify({
-                "code": "validation_error",
-                "error": "JSON payload required"
+                "error": "validation_error",
+                "message": "JSON payload required"
             }), 400
         
         # Validate preferences
         validation_errors = {}
         
-        # Check for unknown keys
+        # Check for unknown keys (sorted for deterministic output)
         known_keys = {'preferred_pace'}
         unknown_keys = set(data.keys()) - known_keys
         if unknown_keys:
-            validation_errors['extra'] = list(unknown_keys)
+            validation_errors['extra'] = sorted(list(unknown_keys))
         
-        # Check snake_case (detect camelCase)
+        # Check snake_case with specific hints
+        camel_to_snake = {'preferredPace': 'preferred_pace'}
         for key in data.keys():
-            if any(c.isupper() for c in key):
-                validation_errors['casing'] = f"Use snake_case, not camelCase: {key}"
+            if key in camel_to_snake:
+                validation_errors['case'] = f"Use snake_case: {camel_to_snake[key]} (not {key})"
+                break
+            elif any(c.isupper() for c in key):
+                validation_errors['case'] = f"Use snake_case format for: {key}"
                 break
         
-        # Validate preferred_pace enum
+        # Validate preferred_pace enum with allowed values
         if 'preferred_pace' in data:
-            if data['preferred_pace'] not in ['slow', 'medium', 'fast']:
-                validation_errors['invalid_fields'] = {'preferred_pace': 'Must be slow, medium, or fast'}
+            value = data['preferred_pace']
+            allowed = ['slow', 'medium', 'fast']
+            if value not in allowed:
+                validation_errors['enum'] = {
+                    'preferred_pace': {
+                        'value': value,
+                        'allowed': allowed
+                    }
+                }
         
         if validation_errors:
             return jsonify({
-                "code": "validation_error",
-                "error": "Invalid preferences data",
+                "error": "validation_error",
                 "details": validation_errors
             }), 400
         
@@ -3428,8 +3438,8 @@ def update_preferences():
         db.session.rollback()
         app.logger.error(f"Preferences update error: {e}")
         return jsonify({
-            "code": "internal_error",
-            "error": "Failed to update preferences"
+            "error": "internal_error",
+            "message": "Failed to update preferences"
         }), 500
 
 @app.route('/api/profile/human-design', methods=['GET'])
