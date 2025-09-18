@@ -1,2 +1,3 @@
-web: gunicorn --bind 0.0.0.0:$PORT app:app
-
+web: bash scripts/boot.sh
+sh
+scripts/boot.sh
