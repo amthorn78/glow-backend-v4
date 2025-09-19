@@ -195,11 +195,37 @@ sess = Session()
 sess.init_app(app)
 
 # Initialize rate limiter
-limiter = Limiter(
-    key_func=get_remote_address,
-    app=app,
-    default_limits=["1000 per hour"]
-)
+def _configure_rate_limiter(app):
+    """Configure Flask-Limiter with Redis backend, with safe fallbacks."""
+    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
+
+    if not storage_uri:
+        storage_uri = os.environ.get("RAILWAY_REDIS_URL")
+
+    if storage_uri:
+        app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+        app.logger.info("RATE_LIMITER=ON (redis)")
+        enabled = True
+    else:
+        if os.environ.get("FLASK_ENV") == "production":
+            app.config["RATELIMIT_ENABLED"] = False
+            app.logger.warning("RATE_LIMITER=OFF (disabled): no storage URI in production")
+            enabled = False
+        else:
+            app.config["RATELIMIT_STORAGE_URI"] = "memory://"
+            app.logger.warning("RATE_LIMITER=ON (memory, non-prod)")
+            enabled = True
+
+    if enabled:
+        Limiter(
+            app,
+            key_func=get_remote_address,
+            default_limits=["1000 per hour"],
+            storage_uri=app.config.get("RATELIMIT_STORAGE_URI")
+        )
+
+_configure_rate_limiter(app)
+
 
 # Initialize Argon2 password hasher
 ph = PasswordHasher()
