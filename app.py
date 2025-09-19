@@ -1509,16 +1509,13 @@ def ensure_database():
                 db.create_all()
                 
                 # Verify tables were created by checking if users table exists
-                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+                if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'].lower():
+                    result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
+                else:
+                    result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+                
                 if not result.fetchone():
-                    # If using PostgreSQL, use different query
-                    try:
-                        result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
-                        if not result.fetchone():
-                            raise Exception("Users table not found after creation")
-                    except:
-                        # Force table creation again
-                        db.create_all()
+                    raise Exception("Users table not found after creation")
                 
                 ensure_database.initialized = True
                 print("Database initialized successfully - all tables created")
