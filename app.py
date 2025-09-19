@@ -29,7 +29,7 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from argon2 import PasswordHasher
-from rate_limit import login_rate_limiter
+
 from argon2.exceptions import VerifyMismatchError
 import redis
 
@@ -194,67 +194,31 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-# Initialize rate limiter with Redis backend - DEFERRED TO RUNTIME
-def _init_rate_limiter():
-    """Initialize Flask-Limiter with Redis backend at runtime."""
-    try:
-        # Primary: explicit RATELIMIT_STORAGE_URI
-        storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
-        
-        # Fallback: Railway-provided Redis URL
-        if not storage_uri:
-            storage_uri = os.environ.get("RAILWAY_REDIS_URL")
-        
-        # Additional fallback: standard Redis URL
-        if not storage_uri:
-            storage_uri = os.environ.get("REDIS_URL")
+def _limiter_storage_uri():
+    """Return Redis URL for production, memory for development."""
+    return os.getenv("REDIS_URL") or "memory://"
 
-        if storage_uri:
-            app.config["RATELIMIT_STORAGE_URI"] = storage_uri
-            limiter = Limiter(
-                key_func=get_remote_address,
-                default_limits=["1000 per hour"],
-                storage_uri=storage_uri
-            )
-            limiter.init_app(app)  # Initialize with app after creation
-            app.logger.info("RATE_LIMITER=ON (redis)")
-            return limiter
-        else:
-            # In production, disable rather than crash
-            is_production = (os.environ.get("RAILWAY_ENVIRONMENT") or 
-                            os.environ.get("DATABASE_URL"))
-            
-            if is_production:
-                app.config["RATELIMIT_ENABLED"] = False
-                app.logger.warning("RATE_LIMITER=OFF (disabled): no Redis URI in production")
-                return None
-            else:
-                # Development: use memory storage
-                limiter = Limiter(
-                    key_func=get_remote_address,
-                    default_limits=["1000 per hour"],
-                    storage_uri="memory://"
-                )
-                limiter.init_app(app)  # Initialize with app after creation
-                app.logger.warning("RATE_LIMITER=ON (memory, non-prod)")
-                return limiter
-                
-    except Exception as e:
-        app.logger.error(f"RATE_LIMITER=ERROR: {str(e)}")
-        app.config["RATELIMIT_ENABLED"] = False
-        return None
+def init_rate_limiting(app):
+    """Initialize Flask-Limiter with environment-aware storage backend."""
+    storage_uri = _limiter_storage_uri()
+    app.config["RATELIMIT_HEADERS_ENABLED"] = True
+    app.config["RATELIMIT_SWALLOW_ERRORS"] = True  # Don't crash on Redis blips
+    limiter = Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+    limiter.init_app(app)
+    backend = "redis" if storage_uri.startswith("redis://") else "memory"
+    app.logger.info("Rate limiting backend: %s", backend)
+    if os.getenv("ENV") == "production" and backend == "memory":
+        app.logger.error("Production without REDIS_URL; using memory limiter.")
+    return limiter
 
-# Initialize rate limiter (will be called at runtime) - NO IMPORT-TIME INITIALIZATION
-limiter = None
-_limiter_initialized = False
+limiter = init_rate_limiting(app)
 
-@app.before_request
-def ensure_rate_limiter():
-    """Ensure rate limiter is initialized on first request."""
-    global limiter, _limiter_initialized
-    if not _limiter_initialized:
-        limiter = _init_rate_limiter()
-        _limiter_initialized = True
+# (Dev-only) probe (env-gated):
+if os.getenv("ENABLE_DIAG_RL") == "1":
+    @app.route("/__diag/rl")
+    @limiter.limit("3 per minute")
+    def rl_probe():
+        return {"ok": True}
 
 
 # Initialize Argon2 password hasher
