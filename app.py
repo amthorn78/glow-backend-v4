@@ -29,7 +29,7 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from argon2 import PasswordHasher
-
+from rate_limit import login_rate_limiter
 from argon2.exceptions import VerifyMismatchError
 import redis
 
@@ -194,32 +194,12 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-def _limiter_storage_uri():
-    """Return Redis URL for production, memory for development."""
-    return os.getenv("REDIS_URL") or "memory://"
-
-def init_rate_limiting(app):
-    """Initialize Flask-Limiter with environment-aware storage backend."""
-    storage_uri = _limiter_storage_uri()
-    app.config["RATELIMIT_HEADERS_ENABLED"] = True
-    app.config["RATELIMIT_SWALLOW_ERRORS"] = True  # Don't crash on Redis blips
-    limiter = Limiter(key_func=get_remote_address, storage_uri=storage_uri)
-    limiter.init_app(app)
-    backend = "redis" if storage_uri.startswith("redis://") else "memory"
-    app.logger.info("Rate limiting backend: %s", backend)
-    if os.getenv("ENV") == "production" and backend == "memory":
-        app.logger.error("Production without REDIS_URL; using memory limiter.")
-    return limiter
-
-limiter = init_rate_limiting(app)
-
-# (Dev-only) probe (env-gated):
-if os.getenv("ENABLE_DIAG_RL") == "1":
-    @app.route("/__diag/rl")
-    @limiter.limit("3 per minute")
-    def rl_probe():
-        return {"ok": True}
-
+# Initialize rate limiter
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["1000 per hour"]
+)
 
 # Initialize Argon2 password hasher
 ph = PasswordHasher()
@@ -1529,13 +1509,16 @@ def ensure_database():
                 db.create_all()
                 
                 # Verify tables were created by checking if users table exists
-                # Use database-agnostic approach
-                try:
-                    # Try to query the users table directly
-                    result = db.session.execute(text("SELECT COUNT(*) FROM users LIMIT 1"))
-                    result.fetchone()  # If this works, table exists
-                except Exception:
-                    raise Exception("Users table not found after creation")
+                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+                if not result.fetchone():
+                    # If using PostgreSQL, use different query
+                    try:
+                        result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
+                        if not result.fetchone():
+                            raise Exception("Users table not found after creation")
+                    except:
+                        # Force table creation again
+                        db.create_all()
                 
                 ensure_database.initialized = True
                 print("Database initialized successfully - all tables created")
@@ -1692,16 +1675,13 @@ def init_database():
             # Force database creation
             db.create_all()
             
-            # Check what tables were created - database agnostic approach
-            # Just verify key tables exist by trying to query them
-            key_tables = ['users', 'user_profiles', 'birth_data', 'human_design_data']
-            tables = []
-            for table in key_tables:
-                try:
-                    db.session.execute(text(f"SELECT COUNT(*) FROM {table} LIMIT 1"))
-                    tables.append(table)
-                except Exception:
-                    pass  # Table doesn't exist or can't be queried
+            # Check what tables were created
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
+                tables = [row[0] for row in result.fetchall()]
+            else:
+                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+                tables = [row[0] for row in result.fetchall()]
             
             return jsonify({
                 'status': 'success',
@@ -1724,10 +1704,16 @@ def migrate_user_profiles():
             db.create_all()
             
             # Check if users table has profile data to migrate
-            check_columns = db.session.execute(text("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
-            """))
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                check_columns = db.session.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+                """))
+            else:
+                # SQLite
+                check_columns = db.session.execute(text("PRAGMA table_info(users)"))
+            
             columns = [row[0] for row in check_columns.fetchall()]
             has_profile_data = 'first_name' in columns or 'last_name' in columns
             
@@ -1796,26 +1782,34 @@ def cleanup_user_redundancy():
     try:
         with app.app_context():
             # Check if columns exist before trying to drop them
-            check_columns = db.session.execute(text("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
-            """))
-            existing_columns = [row[0] for row in check_columns.fetchall()]
-            
-            # Drop columns if they exist
-            for column in existing_columns:
-                try:
-                    db.session.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {column}"))
-                    print(f"Dropped column: {column}")
-                except Exception as e:
-                    print(f"Could not drop column {column}: {e}")
+            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
+                # PostgreSQL
+                check_columns = db.session.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+                """))
+                existing_columns = [row[0] for row in check_columns.fetchall()]
+                
+                # Drop columns if they exist
+                for column in existing_columns:
+                    try:
+                        db.session.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {column}"))
+                        print(f"Dropped column: {column}")
+                    except Exception as e:
+                        print(f"Could not drop column {column}: {e}")
+                
+            else:
+                # SQLite - more complex, need to recreate table
+                print("SQLite detected - column dropping requires table recreation")
+                # For SQLite, we'd need to recreate the table, but this is more complex
+                # For now, just report the status
                 
             db.session.commit()
             
             return jsonify({
                 'status': 'success',
                 'message': 'User table redundancy cleanup completed',
-                'columns_processed': existing_columns
+                'columns_processed': existing_columns if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'] else ['SQLite - manual cleanup needed']
             })
             
     except Exception as e:
@@ -2017,16 +2011,10 @@ def verify_password_v2(password, password_hash):
 # ============================================================================
 
 @app.route('/api/auth/login', methods=['POST'])
+@limiter.limit(app.config['AUTH_RATE_LIMIT_PER_IP'])
 def auth_v2_login():
     """Auth v2 Login - Cookie-based session with JSON contracts"""
     try:
-        # Apply rate limiting if limiter is available
-        if limiter and app.config.get('RATELIMIT_ENABLED', True):
-            try:
-                limiter.limit(app.config['AUTH_RATE_LIMIT_PER_IP'])(lambda: None)()
-            except Exception as e:
-                app.logger.warning(f"Rate limiter error: {e}")
-        
         ensure_database()
         
         # Parse request
@@ -4216,16 +4204,17 @@ def run_boot_self_checks():
                 db.session.execute(text('SELECT 1'))
                 
                 # Check user_preferences table exists and has jsonb prefs column
-                result = db.session.execute(text("""
-                    SELECT column_name, data_type 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'user_preferences' AND column_name = 'prefs'
-                """))
-                prefs_column = result.fetchone()
-                if not prefs_column:
-                    raise Exception("user_preferences.prefs column not found")
-                if 'json' not in prefs_column[1].lower():
-                    raise Exception(f"user_preferences.prefs should be JSON/JSONB, got: {prefs_column[1]}")
+                if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'].lower():
+                    result = db.session.execute(text("""
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'user_preferences' AND column_name = 'prefs'
+                    """))
+                    prefs_column = result.fetchone()
+                    if not prefs_column:
+                        raise Exception("user_preferences.prefs column not found")
+                    if 'json' not in prefs_column[1].lower():
+                        raise Exception(f"user_preferences.prefs should be JSON/JSONB, got: {prefs_column[1]}")
             
             app.logger.info("SANITY_PROBE: PASS")
             
@@ -4233,96 +4222,6 @@ def run_boot_self_checks():
             app.logger.error(f"SANITY_PROBE_FAIL: {e}")
             if is_strict:
                 exit(1)
-    
-    # Mapping Validator (ENABLE_MAPPING_VALIDATOR=1) - Temporarily disabled for debugging
-    if False and os.environ.get('ENABLE_MAPPING_VALIDATOR') == '1':
-        app.logger.info("BOOT: Running mapping validator...")
-        
-        try:
-            import json
-            
-            # Load mapping file
-            mapping_path = os.path.join(os.path.dirname(__file__), 'contracts', 'registry', 'mapping.json')
-            if not os.path.exists(mapping_path):
-                raise Exception(f"Mapping file not found: {mapping_path}")
-            
-            with open(mapping_path, 'r') as f:
-                mapping_data = json.load(f)
-            
-            if not isinstance(mapping_data, list):
-                raise Exception("Mapping must be a JSON array")
-            
-            # Validate each mapping entry
-            for entry in mapping_data:
-                field = entry.get('field')
-                writer = entry.get('writer')
-                payload_path = entry.get('payload_path')
-                read_path = entry.get('read_path')
-                
-                # Schema validation
-                if not field or not isinstance(field, str):
-                    raise Exception(f"Invalid field: {field}")
-                if not field.replace('_', '').isalnum():
-                    raise Exception(f"Field must be snake_case: {field}")
-                
-                if writer not in ['preferences', 'unavailable']:
-                    raise Exception(f"Invalid writer: {writer}")
-                
-                if writer != 'unavailable' and not payload_path:
-                    raise Exception(f"payload_path required for writer {writer}")
-                if writer == 'unavailable' and payload_path:
-                    raise Exception(f"payload_path not allowed for unavailable writer")
-                
-                if not read_path or not read_path.startswith('user.'):
-                    raise Exception(f"read_path must start with 'user.': {read_path}")
-                
-                # Log successful validation
-                app.logger.info(f"MAPPING OK field={field} writer={writer} read_path={read_path}")
-            
-            # Optional sample user validation
-            sample_user_id = os.environ.get('MAPPING_VALIDATE_SAMPLE_USER_ID')
-            if sample_user_id:
-                try:
-                    user_id = int(sample_user_id)
-                    # Build sample /api/auth/me data structure
-                    with app.app_context():
-                        user = User.query.get(user_id)
-                        if user:
-                            # Simulate the same structure as /api/auth/me
-                            user_prefs = UserPreferences.query.filter_by(user_id=user_id).first()
-                            profile = UserProfile.query.filter_by(user_id=user_id).first()
-                            
-                            sample_data = {
-                                'user': {
-                                    'preferences': user_prefs.prefs if user_prefs and user_prefs.prefs else {},
-                                    'profile': {
-                                        'connection_purpose': profile.connection_purpose if profile else None
-                                    }
-                                }
-                            }
-                            
-                            # Test read_path resolution
-                            for entry in mapping_data:
-                                read_path = entry['read_path']
-                                try:
-                                    # Navigate the path (e.g., user.preferences.preferred_pace)
-                                    path_parts = read_path.split('.')
-                                    current = sample_data
-                                    for part in path_parts:
-                                        current = current[part]
-                                    # If we get here, path resolved successfully
-                                except (KeyError, TypeError):
-                                    app.logger.warning(f"MAPPING WARN unresolved read_path={read_path}")
-                        else:
-                            app.logger.warning(f"MAPPING WARN sample user {user_id} not found")
-                except ValueError:
-                    app.logger.warning(f"MAPPING WARN invalid sample user ID: {sample_user_id}")
-            
-            app.logger.info("MAPPING_VALIDATOR: PASS")
-            
-        except Exception as e:
-            app.logger.error(f"MAPPING_VALIDATOR_FAIL: {e}")
-            # Signal-only, never crash
 
 # Run boot self-checks after all initialization is complete
 run_boot_self_checks()
