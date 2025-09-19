@@ -194,12 +194,8 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-# Initialize rate limiter
-limiter = Limiter(
-    key_func=get_remote_address,
-    app=app,
-    default_limits=["1000 per hour"]
-)
+# Initialize rate limiter (module-scope proxy, no env dependencies)
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 # Initialize Argon2 password hasher
 ph = PasswordHasher()
@@ -207,6 +203,20 @@ ph = PasswordHasher()
 # Initialize Redis session store (T3.1-R2)
 session_store = get_session_store()
 app.logger.info(f"Session store initialized: {type(session_store).__name__}")
+
+# Runtime rate limiter initialization
+redis_url = os.getenv("REDIS_URL")
+storage_uri = redis_url or "memory://"
+app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+app.config["RATELIMIT_HEADERS_ENABLED"] = True
+app.config["RATELIMIT_IN_MEMORY_FALLBACK"] = True
+limiter.init_app(app)
+app.logger.info(f"RL storage: {'redis' if redis_url else 'memory'}")
+
+# Optional strict mode enforcement
+if os.getenv("RATELIMIT_STRICT") == "1" and not redis_url:
+    app.logger.error("RATELIMIT_STRICT=1 but REDIS_URL is missing")
+    raise SystemExit(1)
 
 # Configure CORS with secure, production-ready setup
 import re
@@ -4325,6 +4335,16 @@ create_revocation_endpoints(app, session_store, validate_auth_session, csrf_prot
 # ============================================================================
 # Create writer contract audit endpoint (env-gated)
 create_writer_audit_endpoint(app)
+
+# ============================================================================
+# RATE LIMITER DIAGNOSTIC ENDPOINT (env-gated)
+# ============================================================================
+# Optional diagnostic route for rate limiting testing (default OFF)
+if os.getenv("ENABLE_RL_DIAG") == "1":
+    @app.route("/__diag/rl")
+    @limiter.limit("1 per minute")
+    def diag_rl():
+        return {"ok": True}
 
 
 if __name__ == '__main__':
