@@ -1565,9 +1565,12 @@ def ensure_database():
                 db.create_all()
                 
                 # Verify tables were created by checking if users table exists
-                result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
-                
-                if not result.fetchone():
+                # Use database-agnostic approach
+                try:
+                    # Try to query the users table directly
+                    result = db.session.execute(text("SELECT COUNT(*) FROM users LIMIT 1"))
+                    result.fetchone()  # If this works, table exists
+                except Exception:
                     raise Exception("Users table not found after creation")
                 
                 ensure_database.initialized = True
@@ -1725,9 +1728,16 @@ def init_database():
             # Force database creation
             db.create_all()
             
-            # Check what tables were created
-            result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
-            tables = [row[0] for row in result.fetchall()]
+            # Check what tables were created - database agnostic approach
+            # Just verify key tables exist by trying to query them
+            key_tables = ['users', 'user_profiles', 'birth_data', 'human_design_data']
+            tables = []
+            for table in key_tables:
+                try:
+                    db.session.execute(text(f"SELECT COUNT(*) FROM {table} LIMIT 1"))
+                    tables.append(table)
+                except Exception:
+                    pass  # Table doesn't exist or can't be queried
             
             return jsonify({
                 'status': 'success',
