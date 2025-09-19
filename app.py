@@ -2909,14 +2909,27 @@ def get_human_design():
 # API ROUTES - PROFILE MANAGEMENT
 # ============================================================================
 
-@app.route("/api/profile/preferences", methods=["PUT", "OPTIONS"])
-@csrf_protect(session_store, validate_auth_session)  # Applies to PUT only, OPTIONS exempt
+# BE-1: Preferences writer OPTIONS handler (must be before global catch-all)
+@app.route("/api/profile/preferences", methods=["OPTIONS"])
+def preferences_options():
+    """Handle OPTIONS for preferences endpoint specifically"""
+    resp = make_response('', 204)
+    resp.headers['Allow'] = 'PUT, OPTIONS'
+    # Add CORS headers for preflight
+    origin = request.headers.get("Origin")
+    if origin_allowed(origin):
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "PUT, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token"
+        resp.headers["Access-Control-Max-Age"] = "86400"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+@app.route("/api/profile/preferences", methods=["PUT"])
+@csrf_protect(session_store, validate_auth_session)
 def preferences_writer():
     """BE-1: Preferences writer hotfix - prove write→read once"""
-    if request.method == 'OPTIONS':
-        resp = make_response()
-        resp.headers['Allow'] = 'PUT, OPTIONS'
-        return resp
     
     # Require authentication for PUT
     if not hasattr(g, 'user_id') or not g.user_id:
