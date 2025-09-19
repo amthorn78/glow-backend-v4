@@ -2909,6 +2909,67 @@ def get_human_design():
 # API ROUTES - PROFILE MANAGEMENT
 # ============================================================================
 
+@app.route("/api/profile/preferences", methods=["PUT", "OPTIONS"])
+@csrf_protect(session_store, validate_auth_session)  # Applies to PUT only, OPTIONS exempt
+def preferences_writer():
+    """BE-1: Preferences writer hotfix - prove write→read once"""
+    if request.method == 'OPTIONS':
+        resp = make_response()
+        resp.headers['Allow'] = 'PUT, OPTIONS'
+        return resp
+    
+    # Require authentication for PUT
+    if not hasattr(g, 'user_id') or not g.user_id:
+        return jsonify({"error": "forbidden_csrf"}), 403
+    
+    # Validate JSON payload
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "validation_error", "message": "JSON required"}), 400
+    
+    # Check for unknown keys
+    allowed_keys = {"preferred_pace"}
+    unknown_keys = set(data.keys()) - allowed_keys
+    if unknown_keys:
+        return jsonify({
+            "error": "validation_error", 
+            "unknown_keys": list(unknown_keys)
+        }), 400
+    
+    # Validate preferred_pace enum
+    pace = data.get("preferred_pace")
+    allowed_values = ["slow", "medium", "fast"]
+    if pace not in allowed_values:
+        return jsonify({
+            "error": "validation_error",
+            "field": "preferred_pace", 
+            "allowed": allowed_values
+        }), 400
+    
+    try:
+        # Get or create UserPreferences
+        user_prefs = UserPreferences.query.filter_by(user_id=g.user_id).first()
+        if not user_prefs:
+            user_prefs = UserPreferences(user_id=g.user_id, prefs={})
+            db.session.add(user_prefs)
+        
+        # Update preferences
+        if user_prefs.prefs is None:
+            user_prefs.prefs = {}
+        user_prefs.prefs["preferred_pace"] = pace
+        
+        db.session.commit()
+        
+        # Return 204 No Content with Cache-Control: no-store
+        resp = make_response('', 204)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Preferences writer error: {e}")
+        return jsonify({"error": "internal_error"}), 500
+
 @app.route('/api/profile', methods=['GET'])
 @require_auth
 def get_profile():
