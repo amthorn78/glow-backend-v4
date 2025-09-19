@@ -4222,6 +4222,97 @@ def run_boot_self_checks():
             app.logger.error(f"SANITY_PROBE_FAIL: {e}")
             if is_strict:
                 exit(1)
+    
+    # Mapping Validator (ENABLE_MAPPING_VALIDATOR=1)
+    if os.environ.get('ENABLE_MAPPING_VALIDATOR') == '1':
+        app.logger.info("BOOT: Running mapping validator...")
+        
+        try:
+            import json
+            import os
+            
+            # Load mapping file
+            mapping_path = os.path.join(os.path.dirname(__file__), 'contracts', 'registry', 'mapping.json')
+            if not os.path.exists(mapping_path):
+                raise Exception(f"Mapping file not found: {mapping_path}")
+            
+            with open(mapping_path, 'r') as f:
+                mapping_data = json.load(f)
+            
+            if not isinstance(mapping_data, list):
+                raise Exception("Mapping must be a JSON array")
+            
+            # Validate each mapping entry
+            for entry in mapping_data:
+                field = entry.get('field')
+                writer = entry.get('writer')
+                payload_path = entry.get('payload_path')
+                read_path = entry.get('read_path')
+                
+                # Schema validation
+                if not field or not isinstance(field, str):
+                    raise Exception(f"Invalid field: {field}")
+                if not field.replace('_', '').isalnum():
+                    raise Exception(f"Field must be snake_case: {field}")
+                
+                if writer not in ['preferences', 'unavailable']:
+                    raise Exception(f"Invalid writer: {writer}")
+                
+                if writer != 'unavailable' and not payload_path:
+                    raise Exception(f"payload_path required for writer {writer}")
+                if writer == 'unavailable' and payload_path:
+                    raise Exception(f"payload_path not allowed for unavailable writer")
+                
+                if not read_path or not read_path.startswith('user.'):
+                    raise Exception(f"read_path must start with 'user.': {read_path}")
+                
+                # Log successful validation
+                app.logger.info(f"MAPPING OK field={field} writer={writer} read_path={read_path}")
+            
+            # Optional sample user validation
+            sample_user_id = os.environ.get('MAPPING_VALIDATE_SAMPLE_USER_ID')
+            if sample_user_id:
+                try:
+                    user_id = int(sample_user_id)
+                    # Build sample /api/auth/me data structure
+                    with app.app_context():
+                        user = User.query.get(user_id)
+                        if user:
+                            # Simulate the same structure as /api/auth/me
+                            user_prefs = UserPreferences.query.filter_by(user_id=user_id).first()
+                            profile = UserProfile.query.filter_by(user_id=user_id).first()
+                            
+                            sample_data = {
+                                'user': {
+                                    'preferences': user_prefs.prefs if user_prefs and user_prefs.prefs else {},
+                                    'profile': {
+                                        'connection_purpose': profile.connection_purpose if profile else None
+                                    }
+                                }
+                            }
+                            
+                            # Test read_path resolution
+                            for entry in mapping_data:
+                                read_path = entry['read_path']
+                                try:
+                                    # Navigate the path (e.g., user.preferences.preferred_pace)
+                                    path_parts = read_path.split('.')
+                                    current = sample_data
+                                    for part in path_parts:
+                                        current = current[part]
+                                    # If we get here, path resolved successfully
+                                except (KeyError, TypeError):
+                                    app.logger.warning(f"MAPPING WARN unresolved read_path={read_path}")
+                        else:
+                            app.logger.warning(f"MAPPING WARN sample user {user_id} not found")
+                except ValueError:
+                    app.logger.warning(f"MAPPING WARN invalid sample user ID: {sample_user_id}")
+            
+            app.logger.info("MAPPING_VALIDATOR: PASS")
+            
+        except Exception as e:
+            app.logger.error(f"MAPPING_VALIDATOR_FAIL: {e}")
+            # Signal-only, never crash
 
 # Run boot self-checks after all initialization is complete
 run_boot_self_checks()
