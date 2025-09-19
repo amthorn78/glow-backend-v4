@@ -2958,9 +2958,9 @@ def preferences_writer():
     
     try:
         # Get or create UserPreferences
-        user_prefs = UserPreferences.query.filter_by(user_id=g.user_id).first()
+        user_prefs = UserPreferences.query.filter_by(user_id=g.user).first()
         if not user_prefs:
-            user_prefs = UserPreferences(user_id=g.user_id, prefs={})
+            user_prefs = UserPreferences(user_id=g.user, prefs={})
             db.session.add(user_prefs)
         
         # Update preferences
