@@ -1509,10 +1509,7 @@ def ensure_database():
                 db.create_all()
                 
                 # Verify tables were created by checking if users table exists
-                if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'].lower():
-                    result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
-                else:
-                    result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='users'"))
+                result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE tablename='users'"))
                 
                 if not result.fetchone():
                     raise Exception("Users table not found after creation")
@@ -1673,12 +1670,8 @@ def init_database():
             db.create_all()
             
             # Check what tables were created
-            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
-                result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
-                tables = [row[0] for row in result.fetchall()]
-            else:
-                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
-                tables = [row[0] for row in result.fetchall()]
+            result = db.session.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
+            tables = [row[0] for row in result.fetchall()]
             
             return jsonify({
                 'status': 'success',
@@ -1701,16 +1694,10 @@ def migrate_user_profiles():
             db.create_all()
             
             # Check if users table has profile data to migrate
-            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
-                # PostgreSQL
-                check_columns = db.session.execute(text("""
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
-                """))
-            else:
-                # SQLite
-                check_columns = db.session.execute(text("PRAGMA table_info(users)"))
-            
+            check_columns = db.session.execute(text("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+            """))
             columns = [row[0] for row in check_columns.fetchall()]
             has_profile_data = 'first_name' in columns or 'last_name' in columns
             
@@ -1779,34 +1766,26 @@ def cleanup_user_redundancy():
     try:
         with app.app_context():
             # Check if columns exist before trying to drop them
-            if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI']:
-                # PostgreSQL
-                check_columns = db.session.execute(text("""
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
-                """))
-                existing_columns = [row[0] for row in check_columns.fetchall()]
-                
-                # Drop columns if they exist
-                for column in existing_columns:
-                    try:
-                        db.session.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {column}"))
-                        print(f"Dropped column: {column}")
-                    except Exception as e:
-                        print(f"Could not drop column {column}: {e}")
-                
-            else:
-                # SQLite - more complex, need to recreate table
-                print("SQLite detected - column dropping requires table recreation")
-                # For SQLite, we'd need to recreate the table, but this is more complex
-                # For now, just report the status
+            check_columns = db.session.execute(text("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
+            """))
+            existing_columns = [row[0] for row in check_columns.fetchall()]
+            
+            # Drop columns if they exist
+            for column in existing_columns:
+                try:
+                    db.session.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {column}"))
+                    print(f"Dropped column: {column}")
+                except Exception as e:
+                    print(f"Could not drop column {column}: {e}")
                 
             db.session.commit()
             
             return jsonify({
                 'status': 'success',
                 'message': 'User table redundancy cleanup completed',
-                'columns_processed': existing_columns if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'] else ['SQLite - manual cleanup needed']
+                'columns_processed': existing_columns
             })
             
     except Exception as e:
@@ -4201,17 +4180,16 @@ def run_boot_self_checks():
                 db.session.execute(text('SELECT 1'))
                 
                 # Check user_preferences table exists and has jsonb prefs column
-                if 'postgresql' in app.config['SQLALCHEMY_DATABASE_URI'].lower():
-                    result = db.session.execute(text("""
-                        SELECT column_name, data_type 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'user_preferences' AND column_name = 'prefs'
-                    """))
-                    prefs_column = result.fetchone()
-                    if not prefs_column:
-                        raise Exception("user_preferences.prefs column not found")
-                    if 'json' not in prefs_column[1].lower():
-                        raise Exception(f"user_preferences.prefs should be JSON/JSONB, got: {prefs_column[1]}")
+                result = db.session.execute(text("""
+                    SELECT column_name, data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'user_preferences' AND column_name = 'prefs'
+                """))
+                prefs_column = result.fetchone()
+                if not prefs_column:
+                    raise Exception("user_preferences.prefs column not found")
+                if 'json' not in prefs_column[1].lower():
+                    raise Exception(f"user_preferences.prefs should be JSON/JSONB, got: {prefs_column[1]}")
             
             app.logger.info("SANITY_PROBE: PASS")
             
