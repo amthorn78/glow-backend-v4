@@ -197,19 +197,30 @@ sess.init_app(app)
 # Initialize rate limiter
 def _configure_rate_limiter(app):
     """Configure Flask-Limiter with Redis backend, with safe fallbacks."""
+    # Primary: explicit RATELIMIT_STORAGE_URI
     storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
-
+    
+    # Fallback: Railway-provided Redis URL
     if not storage_uri:
         storage_uri = os.environ.get("RAILWAY_REDIS_URL")
+    
+    # Additional fallback: standard Redis URL
+    if not storage_uri:
+        storage_uri = os.environ.get("REDIS_URL")
 
     if storage_uri:
         app.config["RATELIMIT_STORAGE_URI"] = storage_uri
         app.logger.info("RATE_LIMITER=ON (redis)")
         enabled = True
     else:
-        if os.environ.get("FLASK_ENV") == "production":
+        # In production, disable rather than crash
+        is_production = (os.environ.get("RAILWAY_ENVIRONMENT") or 
+                        os.environ.get("DATABASE_URL") or 
+                        os.environ.get("FLASK_ENV") == "production")
+        
+        if is_production:
             app.config["RATELIMIT_ENABLED"] = False
-            app.logger.warning("RATE_LIMITER=OFF (disabled): no storage URI in production")
+            app.logger.warning("RATE_LIMITER=OFF (disabled): no Redis URI in production")
             enabled = False
         else:
             app.config["RATELIMIT_STORAGE_URI"] = "memory://"
