@@ -194,10 +194,65 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-# Initialize rate limiter with safe defaults
-# Temporarily disable rate limiting to restore service
-app.config["RATELIMIT_ENABLED"] = False
-print("RATE_LIMITER=OFF (temporarily disabled for service restoration)")
+# Initialize rate limiter with Redis backend
+def _init_rate_limiter():
+    """Initialize Flask-Limiter with Redis backend at runtime."""
+    try:
+        # Primary: explicit RATELIMIT_STORAGE_URI
+        storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
+        
+        # Fallback: Railway-provided Redis URL
+        if not storage_uri:
+            storage_uri = os.environ.get("RAILWAY_REDIS_URL")
+        
+        # Additional fallback: standard Redis URL
+        if not storage_uri:
+            storage_uri = os.environ.get("REDIS_URL")
+
+        if storage_uri:
+            app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+            limiter = Limiter(
+                app,
+                key_func=get_remote_address,
+                default_limits=["1000 per hour"],
+                storage_uri=storage_uri
+            )
+            app.logger.info("RATE_LIMITER=ON (redis)")
+            return limiter
+        else:
+            # In production, disable rather than crash
+            is_production = (os.environ.get("RAILWAY_ENVIRONMENT") or 
+                            os.environ.get("DATABASE_URL"))
+            
+            if is_production:
+                app.config["RATELIMIT_ENABLED"] = False
+                app.logger.warning("RATE_LIMITER=OFF (disabled): no Redis URI in production")
+                return None
+            else:
+                # Development: use memory storage
+                limiter = Limiter(
+                    app,
+                    key_func=get_remote_address,
+                    default_limits=["1000 per hour"],
+                    storage_uri="memory://"
+                )
+                app.logger.warning("RATE_LIMITER=ON (memory, non-prod)")
+                return limiter
+                
+    except Exception as e:
+        app.logger.error(f"RATE_LIMITER=ERROR: {str(e)}")
+        app.config["RATELIMIT_ENABLED"] = False
+        return None
+
+# Initialize rate limiter (will be called at runtime)
+limiter = None
+
+@app.before_request
+def ensure_rate_limiter():
+    """Ensure rate limiter is initialized on first request."""
+    global limiter
+    if limiter is None:
+        limiter = _init_rate_limiter()
 
 
 # Initialize Argon2 password hasher
