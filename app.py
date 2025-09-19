@@ -194,7 +194,7 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-# Initialize rate limiter with Redis backend
+# Initialize rate limiter with Redis backend - DEFERRED TO RUNTIME
 def _init_rate_limiter():
     """Initialize Flask-Limiter with Redis backend at runtime."""
     try:
@@ -212,11 +212,11 @@ def _init_rate_limiter():
         if storage_uri:
             app.config["RATELIMIT_STORAGE_URI"] = storage_uri
             limiter = Limiter(
-                app,
                 key_func=get_remote_address,
                 default_limits=["1000 per hour"],
                 storage_uri=storage_uri
             )
+            limiter.init_app(app)  # Initialize with app after creation
             app.logger.info("RATE_LIMITER=ON (redis)")
             return limiter
         else:
@@ -231,11 +231,11 @@ def _init_rate_limiter():
             else:
                 # Development: use memory storage
                 limiter = Limiter(
-                    app,
                     key_func=get_remote_address,
                     default_limits=["1000 per hour"],
                     storage_uri="memory://"
                 )
+                limiter.init_app(app)  # Initialize with app after creation
                 app.logger.warning("RATE_LIMITER=ON (memory, non-prod)")
                 return limiter
                 
@@ -244,15 +244,17 @@ def _init_rate_limiter():
         app.config["RATELIMIT_ENABLED"] = False
         return None
 
-# Initialize rate limiter (will be called at runtime)
+# Initialize rate limiter (will be called at runtime) - NO IMPORT-TIME INITIALIZATION
 limiter = None
+_limiter_initialized = False
 
 @app.before_request
 def ensure_rate_limiter():
     """Ensure rate limiter is initialized on first request."""
-    global limiter
-    if limiter is None:
+    global limiter, _limiter_initialized
+    if not _limiter_initialized:
         limiter = _init_rate_limiter()
+        _limiter_initialized = True
 
 
 # Initialize Argon2 password hasher
@@ -2041,10 +2043,16 @@ def verify_password_v2(password, password_hash):
 # ============================================================================
 
 @app.route('/api/auth/login', methods=['POST'])
-@limiter.limit(app.config['AUTH_RATE_LIMIT_PER_IP'])
 def auth_v2_login():
     """Auth v2 Login - Cookie-based session with JSON contracts"""
     try:
+        # Apply rate limiting if limiter is available
+        if limiter and app.config.get('RATELIMIT_ENABLED', True):
+            try:
+                limiter.limit(app.config['AUTH_RATE_LIMIT_PER_IP'])(lambda: None)()
+            except Exception as e:
+                app.logger.warning(f"Rate limiter error: {e}")
+        
         ensure_database()
         
         # Parse request
@@ -4258,7 +4266,6 @@ def run_boot_self_checks():
         
         try:
             import json
-            import os
             
             # Load mapping file
             mapping_path = os.path.join(os.path.dirname(__file__), 'contracts', 'registry', 'mapping.json')
