@@ -194,61 +194,10 @@ db.init_app(app)
 sess = Session()
 sess.init_app(app)
 
-# Initialize rate limiter (deferred configuration)
-limiter = None
-
-def _configure_rate_limiter():
-    """Configure Flask-Limiter with Redis backend at runtime."""
-    global limiter
-    
-    # Only configure once
-    if limiter is not None:
-        return
-    
-    # Primary: explicit RATELIMIT_STORAGE_URI
-    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
-    
-    # Fallback: Railway-provided Redis URL
-    if not storage_uri:
-        storage_uri = os.environ.get("RAILWAY_REDIS_URL")
-    
-    # Additional fallback: standard Redis URL
-    if not storage_uri:
-        storage_uri = os.environ.get("REDIS_URL")
-
-    if storage_uri:
-        app.config["RATELIMIT_STORAGE_URI"] = storage_uri
-        app.logger.info("RATE_LIMITER=ON (redis)")
-        limiter = Limiter(
-            app,
-            key_func=get_remote_address,
-            default_limits=["1000 per hour"],
-            storage_uri=storage_uri
-        )
-    else:
-        # In production, disable rather than crash
-        is_production = (os.environ.get("RAILWAY_ENVIRONMENT") or 
-                        os.environ.get("DATABASE_URL") or 
-                        os.environ.get("FLASK_ENV") == "production")
-        
-        if is_production:
-            app.config["RATELIMIT_ENABLED"] = False
-            app.logger.warning("RATE_LIMITER=OFF (disabled): no Redis URI in production")
-            # No limiter initialization
-        else:
-            app.config["RATELIMIT_STORAGE_URI"] = "memory://"
-            app.logger.warning("RATE_LIMITER=ON (memory, non-prod)")
-            limiter = Limiter(
-                app,
-                key_func=get_remote_address,
-                default_limits=["1000 per hour"],
-                storage_uri="memory://"
-            )
-
-# Configure rate limiter on first request
-@app.before_first_request
-def setup_rate_limiter():
-    _configure_rate_limiter()
+# Initialize rate limiter with safe defaults
+# Temporarily disable rate limiting to restore service
+app.config["RATELIMIT_ENABLED"] = False
+print("RATE_LIMITER=OFF (temporarily disabled for service restoration)")
 
 
 # Initialize Argon2 password hasher
