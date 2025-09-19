@@ -4222,6 +4222,88 @@ def run_boot_self_checks():
             app.logger.error(f"SANITY_PROBE_FAIL: {e}")
             if is_strict:
                 exit(1)
+    
+    # Registry Mapping Validator (ENABLE_MAPPING_VALIDATOR=1)
+    if os.environ.get('ENABLE_MAPPING_VALIDATOR') == '1':
+        app.logger.info("BOOT: Running mapping validator...")
+        
+        try:
+            # Load mapping file
+            mapping_path = os.path.join(os.path.dirname(__file__), 'contracts', 'registry', 'mapping.json')
+            with open(mapping_path, 'r') as f:
+                mappings = json.load(f)
+            
+            app.logger.info(f"MAPPING: loaded {len(mappings)} entries")
+            
+            # Schema validation
+            for entry in mappings:
+                # Required keys
+                if 'field' not in entry or 'writer' not in entry or 'read_path' not in entry:
+                    raise Exception(f"Missing required keys in mapping entry: {entry}")
+                
+                # Writer validation
+                if entry['writer'] not in ['preferences', 'unavailable']:
+                    raise Exception(f"Invalid writer '{entry['writer']}' in field '{entry['field']}'")
+                
+                # Payload path validation
+                if entry['writer'] != 'unavailable' and 'payload_path' not in entry:
+                    raise Exception(f"Missing payload_path for writer '{entry['writer']}' in field '{entry['field']}'")
+                
+                # Read path validation
+                if not entry['read_path'].startswith('user.'):
+                    raise Exception(f"Invalid read_path '{entry['read_path']}' in field '{entry['field']}' - must start with 'user.'")
+                
+                app.logger.info(f"MAPPING OK field={entry['field']} writer={entry['writer']} read_path={entry['read_path']}")
+            
+            app.logger.info("MAPPING: schema OK")
+            
+            # Optional sample validation
+            sample_user_id = os.environ.get('MAPPING_VALIDATE_SAMPLE_USER_ID')
+            if sample_user_id:
+                app.logger.info(f"MAPPING: validating read_paths against user {sample_user_id}")
+                
+                with app.app_context():
+                    # Fetch user data using same logic as /api/auth/me
+                    user = User.query.get(int(sample_user_id))
+                    if not user:
+                        app.logger.warning(f"MAPPING WARN: sample user {sample_user_id} not found")
+                    else:
+                        # Build user data structure like /api/auth/me
+                        user_data = {
+                            'user': {
+                                'preferences': {},
+                                'profile': {
+                                    'connection_purpose': user.connection_purpose
+                                }
+                            }
+                        }
+                        
+                        # Add preferences if available
+                        if hasattr(user, 'preferences') and user.preferences:
+                            user_data['user']['preferences'] = user.preferences.prefs if user.preferences.prefs else {}
+                        
+                        # Validate each read_path
+                        for entry in mappings:
+                            read_path = entry['read_path']
+                            path_parts = read_path.split('.')
+                            
+                            current = user_data
+                            resolved = True
+                            for part in path_parts:
+                                if isinstance(current, dict) and part in current:
+                                    current = current[part]
+                                else:
+                                    resolved = False
+                                    break
+                            
+                            if resolved:
+                                app.logger.info(f"MAPPING: read_path OK {read_path}")
+                            else:
+                                app.logger.warning(f"MAPPING WARN unresolved read_path={read_path}")
+            
+        except Exception as e:
+            app.logger.error(f"MAPPING_VALIDATOR_FAIL: {e}")
+            # Signal-only, never crash
 
 # Run boot self-checks after all initialization is complete
 run_boot_self_checks()
