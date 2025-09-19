@@ -2927,13 +2927,10 @@ def preferences_options():
     return resp
 
 @app.route("/api/profile/preferences", methods=["PUT"])
+@require_auth
 @csrf_protect(session_store, validate_auth_session)
 def preferences_writer():
     """BE-1: Preferences writer hotfix - prove write→read once"""
-    
-    # Require authentication for PUT
-    if not hasattr(g, 'user_id') or not g.user_id:
-        return jsonify({"error": "forbidden_csrf"}), 403
     
     # Validate JSON payload
     data = request.get_json()
