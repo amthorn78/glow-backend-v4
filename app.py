@@ -4198,8 +4198,8 @@ def run_boot_self_checks():
             if is_strict:
                 exit(1)
     
-    # Mapping Validator (ENABLE_MAPPING_VALIDATOR=1)
-    if os.environ.get('ENABLE_MAPPING_VALIDATOR') == '1':
+    # Mapping Validator (ENABLE_MAPPING_VALIDATOR=1) - Temporarily disabled for debugging
+    if False and os.environ.get('ENABLE_MAPPING_VALIDATOR') == '1':
         app.logger.info("BOOT: Running mapping validator...")
         
         try:
