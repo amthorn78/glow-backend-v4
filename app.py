@@ -4320,7 +4320,7 @@ if __name__ == '__main__':
 
 @app.route('/api/profile/preferences', methods=['PUT'])
 @require_auth
-@csrf_protect
+@csrf_protect(session_store, validate_auth_session)
 def update_user_preferences():
     """
     Update user preferences, specifically 'preferred_pace'.
