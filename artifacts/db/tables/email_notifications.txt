@@ -1,0 +1,13 @@
+Table: email_notifications
+==========================
+
+Columns:
+  id: integer (nullable: NO) DEFAULT nextval('email_notifications_id_seq'::regclass)
+  user_id: integer (nullable: YES)
+  email_type: character varying(50) (nullable: NO)
+  recipient_email: character varying(255) (nullable: NO)
+  subject: character varying(255) (nullable: YES)
+  sent_at: timestamp without time zone (nullable: YES)
+  delivery_status: character varying(20) (nullable: YES)
+
+Row count: 5

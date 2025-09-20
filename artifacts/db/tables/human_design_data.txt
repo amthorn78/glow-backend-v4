@@ -1,0 +1,14 @@
+Table: human_design_data
+========================
+
+Columns:
+  user_id: integer (nullable: NO)
+  chart_data: text (nullable: YES)
+  energy_type: character varying(50) (nullable: YES)
+  strategy: character varying(100) (nullable: YES)
+  authority: character varying(100) (nullable: YES)
+  profile: character varying(20) (nullable: YES)
+  api_response: text (nullable: YES)
+  calculated_at: timestamp without time zone (nullable: YES)
+
+Row count: 0

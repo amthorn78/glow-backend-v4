@@ -1,0 +1,5 @@
+repo=glow-backend-v4
+commit=ea85d46
+time=20250920T224313Z
+predeploy=OK: db reachable
+SANITY: OK

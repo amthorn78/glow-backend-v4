@@ -1,0 +1,9 @@
+Table: user_preferences
+=======================
+
+Columns:
+  user_id: integer (nullable: NO)
+  prefs: json (nullable: YES)
+  updated_at: timestamp without time zone (nullable: YES)
+
+Row count: 1

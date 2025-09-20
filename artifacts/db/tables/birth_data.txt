@@ -1,0 +1,30 @@
+Table: birth_data
+=================
+
+Columns:
+  user_id: integer (nullable: NO)
+  birth_date: date (nullable: YES)
+  birth_time: time without time zone (nullable: YES)
+  birth_location: character varying(255) (nullable: YES)
+  latitude: numeric (nullable: YES)
+  longitude: numeric (nullable: YES)
+  data_consent: boolean (nullable: YES)
+  sharing_consent: boolean (nullable: YES)
+  location_display_name: text (nullable: YES)
+  location_country: character varying(100) (nullable: YES)
+  location_state: character varying(100) (nullable: YES)
+  location_city: character varying(100) (nullable: YES)
+  location_importance: numeric (nullable: YES)
+  location_osm_id: bigint (nullable: YES)
+  location_osm_type: character varying(20) (nullable: YES)
+  timezone: character varying(50) (nullable: YES)
+  location_source: character varying(20) (nullable: YES) DEFAULT 'manual'::character varying
+  location_verified: boolean (nullable: YES) DEFAULT false
+
+Indexes:
+  idx_birth_data_city: location_city
+  idx_birth_data_country: location_country
+  idx_birth_data_source: location_source
+  idx_birth_data_verified: location_verified
+
+Row count: 1

@@ -1,0 +1,20 @@
+Table: user_profiles
+====================
+
+Columns:
+  id: integer (nullable: NO) DEFAULT nextval('user_profiles_id_seq'::regclass)
+  user_id: integer (nullable: NO)
+  first_name: character varying(50) (nullable: YES)
+  last_name: character varying(50) (nullable: YES)
+  bio: text (nullable: YES)
+  age: integer (nullable: YES)
+  profile_completion: integer (nullable: YES)
+  created_at: timestamp without time zone (nullable: YES)
+  updated_at: timestamp without time zone (nullable: YES)
+  display_name: character varying(100) (nullable: YES)
+  avatar_url: character varying(500) (nullable: YES)
+
+Indexes:
+  user_profiles_user_id_key: user_id (UNIQUE)
+
+Row count: 5

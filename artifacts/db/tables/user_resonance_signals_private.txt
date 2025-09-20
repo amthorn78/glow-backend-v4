@@ -1,0 +1,22 @@
+Table: user_resonance_signals_private
+=====================================
+
+Columns:
+  user_id: integer (nullable: NO)
+  decision_mode: character varying(50) (nullable: NO)
+  interaction_mode: character varying(50) (nullable: NO)
+  connection_style: character varying(50) (nullable: NO)
+  bridges_count: smallint (nullable: NO)
+  emotion_signal: boolean (nullable: NO)
+  work_energy: boolean (nullable: NO)
+  will_signal: boolean (nullable: NO)
+  expression_signal: boolean (nullable: NO)
+  mind_signal: boolean (nullable: NO)
+  role_pattern: character varying(50) (nullable: NO)
+  tempo_pattern: character varying(50) (nullable: YES)
+  identity_openness: boolean (nullable: NO)
+  trajectory_code: character varying(20) (nullable: YES)
+  confidence: json (nullable: YES)
+  computed_at: timestamp without time zone (nullable: NO)
+
+Row count: 0

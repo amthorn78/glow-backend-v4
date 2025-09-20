@@ -1,0 +1,17 @@
+Table: user_priorities
+======================
+
+Columns:
+  user_id: integer (nullable: NO)
+  love_priority: smallint (nullable: YES)
+  intimacy_priority: smallint (nullable: YES)
+  communication_priority: smallint (nullable: YES)
+  friendship_priority: smallint (nullable: YES)
+  collaboration_priority: smallint (nullable: YES)
+  lifestyle_priority: smallint (nullable: YES)
+  decisions_priority: smallint (nullable: YES)
+  support_priority: smallint (nullable: YES)
+  growth_priority: smallint (nullable: YES)
+  space_priority: smallint (nullable: YES)
+
+Row count: 5

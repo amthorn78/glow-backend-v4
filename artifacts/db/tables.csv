@@ -1,0 +1,14 @@
+table,column,ref_table,ref_column
+admin_action_log,admin_user_id,users,id
+admin_action_log,target_user_id,users,id
+birth_data,user_id,users,id
+compatibility_matrix,user_a_id,users,id
+compatibility_matrix,user_b_id,users,id
+email_notifications,user_id,users,id
+human_design_data,user_id,users,id
+user_preferences,user_id,users,id
+user_priorities,user_id,users,id
+user_profiles,user_id,users,id
+user_resonance_prefs,user_id,users,id
+user_resonance_signals_private,user_id,users,id
+user_sessions,user_id,users,id

@@ -1,0 +1,12 @@
+Table: admin_action_log
+=======================
+
+Columns:
+  id: integer (nullable: NO) DEFAULT nextval('admin_action_log_id_seq'::regclass)
+  admin_user_id: integer (nullable: YES)
+  action: character varying(50) (nullable: NO)
+  target_user_id: integer (nullable: YES)
+  details: text (nullable: YES)
+  timestamp: timestamp without time zone (nullable: YES)
+
+Row count: 2

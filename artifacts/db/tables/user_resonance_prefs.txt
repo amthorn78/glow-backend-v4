@@ -1,0 +1,12 @@
+Table: user_resonance_prefs
+===========================
+
+Columns:
+  user_id: integer (nullable: NO)
+  version: integer (nullable: NO)
+  weights: json (nullable: NO)
+  facets: json (nullable: YES)
+  created_at: timestamp without time zone (nullable: NO)
+  updated_at: timestamp without time zone (nullable: NO)
+
+Row count: 0

@@ -1,0 +1,14 @@
+Table: user_sessions
+====================
+
+Columns:
+  id: integer (nullable: NO) DEFAULT nextval('user_sessions_id_seq'::regclass)
+  user_id: integer (nullable: NO)
+  session_token: character varying(255) (nullable: NO)
+  created_at: timestamp without time zone (nullable: YES)
+  expires_at: timestamp without time zone (nullable: NO)
+
+Indexes:
+  ix_user_sessions_session_token: session_token (UNIQUE)
+
+Row count: 66

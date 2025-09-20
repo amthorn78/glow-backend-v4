@@ -1,0 +1,17 @@
+Table: users
+============
+
+Columns:
+  id: integer (nullable: NO) DEFAULT nextval('users_id_seq'::regclass)
+  email: character varying(120) (nullable: NO)
+  password_hash: character varying(255) (nullable: NO)
+  status: character varying(20) (nullable: YES)
+  created_at: timestamp without time zone (nullable: YES)
+  updated_at: timestamp without time zone (nullable: YES)
+  is_admin: boolean (nullable: NO) DEFAULT false
+  profile_version: integer (nullable: NO) DEFAULT 1
+
+Indexes:
+  ix_users_email: email (UNIQUE)
+
+Row count: 5

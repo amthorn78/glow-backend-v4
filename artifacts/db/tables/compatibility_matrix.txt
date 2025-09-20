@@ -1,0 +1,20 @@
+Table: compatibility_matrix
+===========================
+
+Columns:
+  user_a_id: integer (nullable: NO)
+  user_b_id: integer (nullable: NO)
+  love_score: smallint (nullable: YES)
+  intimacy_score: smallint (nullable: YES)
+  communication_score: smallint (nullable: YES)
+  friendship_score: smallint (nullable: YES)
+  collaboration_score: smallint (nullable: YES)
+  lifestyle_score: smallint (nullable: YES)
+  decisions_score: smallint (nullable: YES)
+  support_score: smallint (nullable: YES)
+  growth_score: smallint (nullable: YES)
+  space_score: smallint (nullable: YES)
+  overall_score: smallint (nullable: YES)
+  calculated_at: timestamp without time zone (nullable: YES)
+
+Row count: 0
