@@ -25,6 +25,7 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy import text, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.attributes import flag_modified
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -3000,7 +3001,7 @@ def preferences_writer():
         user_prefs.prefs["preferred_pace"] = pace
         
         # Critical: Mark JSONB field as modified for PostgreSQL
-        db.session.flag_modified(user_prefs, "prefs")
+        flag_modified(user_prefs, "prefs")
         
         db.session.commit()
         
@@ -4313,4 +4314,62 @@ if __name__ == '__main__':
     # Only for local development testing
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
+
+
+
+
+@app.route('/api/profile/preferences', methods=['PUT'])
+@require_auth
+@csrf_protect
+def update_user_preferences():
+    """
+    Update user preferences, specifically 'preferred_pace'.
+    This endpoint is lake-compliant and ensures PUT->GET round-trip truth.
+    """
+    try:
+        user_id = g.user.id
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'error': 'Invalid JSON payload'}), 400
+
+        preferred_pace = data.get('preferred_pace')
+
+        if preferred_pace not in ['slow', 'medium', 'fast']:
+            return jsonify({'error': 'Invalid value for preferred_pace'}), 400
+
+        prefs_record = UserPreferences.query.filter_by(user_id=user_id).first()
+
+        if not prefs_record:
+            prefs_record = UserPreferences(user_id=user_id, prefs={})
+            db.session.add(prefs_record)
+
+        if prefs_record.prefs is None:
+            prefs_record.prefs = {}
+
+        prefs_record.prefs['preferred_pace'] = preferred_pace
+        
+        # Mark the JSONB field as modified
+        flag_modified(prefs_record, "prefs")
+
+        db.session.commit()
+
+        # Prepare response
+        response = make_response(jsonify({'status': 'ok'}), 200)
+        response.headers['Cache-Control'] = 'no-store'
+        
+        # Echo X-Correlation-Id if present
+        correlation_id = request.headers.get('X-Correlation-Id')
+        if correlation_id:
+            response.headers['X-Correlation-Id'] = correlation_id
+            
+        return response
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        app.logger.error(f"Database error in update_user_preferences: {e}")
+        return jsonify({'error': 'Database error'}), 500
+    except Exception as e:
+        app.logger.error(f"Error in update_user_preferences: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
