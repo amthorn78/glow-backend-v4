@@ -2919,52 +2919,73 @@ def get_human_design():
 # API ROUTES - PROFILE MANAGEMENT
 # ============================================================================
 
-# BE-1: Preferences writer OPTIONS handler (must be before global catch-all)
+# BE-P0: Preferences writer OPTIONS handler (lake-compliant)
 @app.route("/api/profile/preferences", methods=["OPTIONS"])
 def preferences_options():
-    """Handle OPTIONS for preferences endpoint specifically"""
+    """Handle OPTIONS for preferences endpoint with correlation ID support"""
+    correlation_id = request.headers.get('X-Correlation-Id')
+    
     resp = make_response('', 204)
     resp.headers['Allow'] = 'PUT, OPTIONS'
-    # Add CORS headers for preflight
+    
+    # Echo correlation ID if provided
+    if correlation_id:
+        resp.headers['X-Correlation-Id'] = correlation_id
+    
+    # Same-origin model: no CORS headers required for same-origin requests
+    # If cross-origin needed in future, add proper CORS headers here
     origin = request.headers.get("Origin")
-    if origin_allowed(origin):
+    if origin and origin_allowed(origin):
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Methods"] = "PUT, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, X-Correlation-Id"
         resp.headers["Access-Control-Max-Age"] = "86400"
-        resp.headers["Vary"] = "Origin"
+        resp.headers["Vary"] = "Origin, Access-Control-Request-Headers"
+    
     return resp
 
 @app.route("/api/profile/preferences", methods=["PUT"])
 @require_auth
 @csrf_protect(session_store, validate_auth_session)
 def preferences_writer():
-    """BE-1: Preferences writer hotfix - prove write→read once"""
+    """BE-P0: Lake-compliant preferences writer - prove PUT→GET round-trip"""
+    
+    # Handle correlation ID (echo if provided)
+    correlation_id = request.headers.get('X-Correlation-Id')
     
     # Validate JSON payload
     data = request.get_json()
     if not data:
-        return jsonify({"error": "validation_error", "message": "JSON required"}), 400
+        resp = jsonify({"error": "validation_error", "message": "JSON required"})
+        if correlation_id:
+            resp.headers['X-Correlation-Id'] = correlation_id
+        return resp, 400
     
     # Check for unknown keys
     allowed_keys = {"preferred_pace"}
     unknown_keys = set(data.keys()) - allowed_keys
     if unknown_keys:
-        return jsonify({
+        resp = jsonify({
             "error": "validation_error", 
             "unknown_keys": list(unknown_keys)
-        }), 400
+        })
+        if correlation_id:
+            resp.headers['X-Correlation-Id'] = correlation_id
+        return resp, 400
     
     # Validate preferred_pace enum
     pace = data.get("preferred_pace")
     allowed_values = ["slow", "medium", "fast"]
     if pace not in allowed_values:
-        return jsonify({
+        resp = jsonify({
             "error": "validation_error",
             "field": "preferred_pace", 
             "allowed": allowed_values
-        }), 400
+        })
+        if correlation_id:
+            resp.headers['X-Correlation-Id'] = correlation_id
+        return resp, 400
     
     try:
         # Get or create UserPreferences
@@ -2973,22 +2994,30 @@ def preferences_writer():
             user_prefs = UserPreferences(user_id=g.user, prefs={})
             db.session.add(user_prefs)
         
-        # Update preferences
+        # Update preferences with proper JSONB flagging for PostgreSQL
         if user_prefs.prefs is None:
             user_prefs.prefs = {}
         user_prefs.prefs["preferred_pace"] = pace
         
+        # Critical: Mark JSONB field as modified for PostgreSQL
+        db.session.flag_modified(user_prefs, "prefs")
+        
         db.session.commit()
         
-        # Return 204 No Content with Cache-Control: no-store
-        resp = make_response('', 204)
+        # Lake-compliant response: 200 + {"status":"ok"} with Cache-Control: no-store
+        resp = make_response(jsonify({"status": "ok"}), 200)
         resp.headers['Cache-Control'] = 'no-store'
+        if correlation_id:
+            resp.headers['X-Correlation-Id'] = correlation_id
         return resp
         
     except Exception as e:
         db.session.rollback()
         app.logger.error(f"Preferences writer error: {e}")
-        return jsonify({"error": "internal_error"}), 500
+        resp = jsonify({"error": "internal_error"})
+        if correlation_id:
+            resp.headers['X-Correlation-Id'] = correlation_id
+        return resp, 500
 
 @app.route('/api/profile', methods=['GET'])
 @require_auth
@@ -3447,74 +3476,7 @@ def put_profile_basic_info():
     except Exception as e:
         app.logger.error(f"Put profile basic-info error: {e}")
         db.session.rollback()
-        return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500@app.route("/api/profile/preferences", methods=["PUT"])
-@require_auth
-@csrf_protect(session_store, validate_auth_session)
-def update_preferences():
-    """Update user preferences, persist to DB, and return minimal response."""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "validation_error", "message": "JSON payload required"}), 400
-
-        # --- Validation ---
-        allowed_pace = ["slow", "medium", "fast"]
-        preferred_pace = data.get("preferred_pace")
-
-        if "preferred_pace" not in data or preferred_pace not in allowed_pace:
-            return jsonify({
-                "error": "validation_error",
-                "details": {"preferred_pace": f"must be one of {allowed_pace}"}
-            }), 400
-
-        # --- Persistence ---
-        user_prefs = UserPreferences.query.filter_by(user_id=g.user).first()
-        if not user_prefs:
-            user_prefs = UserPreferences(user_id=g.user)
-            db.session.add(user_prefs)
-
-        if not user_prefs.prefs:
-            user_prefs.prefs = {}
-
-        user_prefs.prefs["preferred_pace"] = preferred_pace
-        # Mark as modified for JSONB to detect changes
-        db.session.flag_modified(user_prefs, "prefs")
-
-        db.session.commit()
-
-        # --- Response (Lake-Compliant) ---
-        response = make_response(jsonify({"status": "ok"}), 200)
-        response.headers["Cache-Control"] = "no-store"
-        return response
-
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"Preferences update error: {e}")
-        return jsonify({"error": "server_error"}), 500
-        if not prefs_record:
-            prefs_record = UserPreferences(user_id=g.user, prefs={})
-            db.session.add(prefs_record)
-        
-        # Update preferences (merge with existing)
-        current_prefs = prefs_record.prefs or {}
-        current_prefs.update(data)
-        prefs_record.prefs = current_prefs
-        prefs_record.updated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        # Lake-compliant success response
-        response = jsonify({"status": "ok"})
-        response.headers['Cache-Control'] = 'no-store'
-        return response, 200
-        
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"Preferences update error: {e}")
-        return jsonify({
-            "error": "internal_error",
-            "message": "Failed to update preferences"
-        }), 500
+        return jsonify({'error': 'server_error', 'message': 'Failed to update basic info'}), 500
 
 @app.route('/api/profile/human-design', methods=['GET'])
 @require_auth
