@@ -25,3 +25,7 @@ wheels/
 auth_v2_env/
 *.pyc
 __pycache__/
+
+# Environment files
+*.env
+.env*
