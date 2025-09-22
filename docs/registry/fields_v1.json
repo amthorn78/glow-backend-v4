@@ -1,0 +1,126 @@
+[
+  {
+    "id": "birth_date",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.birth_data.date",
+    "writer": "birth_data",
+    "version": "1.1",
+    "display": {
+      "label": "Birth date",
+      "control": "date",
+      "group": "profile",
+      "order": 10
+    },
+    "deps": []
+  },
+  {
+    "id": "birth_time",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.birth_data.time",
+    "writer": "birth_data",
+    "version": "1.1",
+    "display": {
+      "label": "Birth time",
+      "control": "time",
+      "group": "profile",
+      "order": 20
+    },
+    "deps": []
+  },
+  {
+    "id": "birth_place_text",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.birth_data.location",
+    "writer": "birth_data",
+    "version": "1.1",
+    "display": {
+      "label": "Birth place",
+      "control": "text",
+      "group": "profile",
+      "order": 30
+    },
+    "deps": []
+  },
+  {
+    "id": "gender_basic",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.profile.gender",
+    "writer": "profile",
+    "enum": ["male", "female", "non_binary"],
+    "version": "1.1",
+    "display": {
+      "label": "Gender",
+      "control": "select",
+      "group": "profile",
+      "order": 40
+    },
+    "deps": []
+  },
+  {
+    "id": "relationship_intent",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.profile.relationship_intent",
+    "writer": "profile",
+    "enum": ["long_term", "short_term", "friends", "figuring_it_out"],
+    "version": "1.1",
+    "display": {
+      "label": "Intention",
+      "control": "select",
+      "group": "profile",
+      "order": 50
+    },
+    "deps": []
+  },
+  {
+    "id": "in_search_of[]",
+    "owner": "fe",
+    "exposure": "ui",
+    "status": "active",
+    "writable": true,
+    "read_path": "user.profile.in_search_of",
+    "writer": "profile",
+    "enum": ["male", "female", "non_binary"],
+    "version": "1.1",
+    "display": {
+      "label": "In search of",
+      "control": "multi_select",
+      "group": "profile",
+      "order": 60
+    },
+    "deps": [],
+    "notes": "Keep bracketed id in v1.1; plan v1.2 to rename to in_search_of + cardinality:multi"
+  },
+  {
+    "id": "preferred_pace",
+    "owner": "be",
+    "exposure": "api",
+    "status": "parked",
+    "writable": true,
+    "read_path": "user.preferences.preferred_pace",
+    "writer": "preferences",
+    "enum": ["slow", "medium", "fast"],
+    "version": "1.1",
+    "display": {
+      "label": "Pace",
+      "control": "select",
+      "group": "prefs",
+      "order": 70
+    },
+    "deps": []
+  }
+]

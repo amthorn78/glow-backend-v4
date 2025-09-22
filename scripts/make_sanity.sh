@@ -42,5 +42,16 @@ with open("artifacts/hd_env_sanity.txt", "w") as f:
     f.write(f"SANITY: {status}\n")  # per BE-01 acceptance
 PY
   
+  # Registry validation
+  python3 scripts/registry_validate.py --out artifacts/registry_report.txt
+  rc=$?
+  if [ "${REGISTRY_STRICT:-0}" = "1" ] && [ $rc -ne 0 ]; then
+    echo "SANITY: FAIL (registry)" | tee -a artifacts/sanity.txt
+    exit 1
+  else
+    status=$([ $rc -eq 0 ] && echo "OK" || echo "WARN")
+    echo "SANITY: ${status} (registry)" | tee -a artifacts/sanity.txt
+  fi
+  
   echo "SANITY: OK"
 } | tee artifacts/sanity.txt
